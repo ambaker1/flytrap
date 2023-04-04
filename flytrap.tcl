@@ -18,10 +18,8 @@ namespace eval ::flytrap {
     variable maxDepth; # Maximum debug depth
     variable debugBody; # Command passed to internal Debug command
     variable stack; # Stack of evaluation in debug
+    variable errorStack; # Commands evaluated before error
     variable verboseFlag; # Whether debug is verbose, or only prints on error.
-    variable errorFile; # File that the error occurred on in "debug"
-    variable errorLine; # Line that the error occurred on in "debug"
-    variable errorFlag; # Whether error has been reached in "debug"
 
     # Exported commands
 	namespace export >; # Print command and result, similar to interactive mode
@@ -111,6 +109,7 @@ proc ::flytrap::EnterStep {cmdString args} {
             }  
         }; # end if command not main uplevel
     }; # end if valid depth
+    return
 }
 
 # LeaveStep --
@@ -126,6 +125,7 @@ proc ::flytrap::LeaveStep {cmdString code result args} {
     variable errorStack
     set depth [expr {[info level] - $baseLevel}]
     if {$depth <= $maxDepth} {
+        # Handle command and error stacks
         if {$cmdString ne [list uplevel 2 $debugBody]} {
             if {$verboseFlag} {
                 set prefix [string repeat "  " $depth]
@@ -133,9 +133,16 @@ proc ::flytrap::LeaveStep {cmdString code result args} {
             } else {
                 lappend stack [list leave $depth $result]
             }
+            set errorStack [lreplace $errorStack end end]
         }; # end if command not main uplevel
         # Process error not controlled by "catch"
-        if {$code == 1 && [lsearch -index 0 -exact $errorStack catch] == -1} {
+        if {$code == 1} {
+            # Verify that it is not wrapped by a built-in error handler
+            foreach cmdString $errorStack {
+                if {[lindex $cmdString 0] in {catch try}} {
+                    return
+                }
+            }
             # Get frame that LeaveTrace is on
             for {set i 1} {$i < [info frame]} {incr i} {
                 set frame [info frame -$i]
@@ -173,11 +180,9 @@ proc ::flytrap::LeaveStep {cmdString code result args} {
             uplevel 1 [list ::wob::mainLoop break]
             trace remove execution Debug enterstep ::flytrap::EnterStep
             trace remove execution Debug leavestep ::flytrap::LeaveStep
-        } else {
-            set errorStack [lreplace $errorStack end end]
         }
     }; # end if valid depth
-    
+    return
 }
 
 # pause --

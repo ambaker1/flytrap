@@ -6,6 +6,11 @@ proc foo {x} {
 proc bar {x} {
     eval [list expr {1/[expr {$x - $x}]}]
 }
-pause
+# pause
 catch {foo $a}
+try {
+    foo $a
+} finally {
+    foo $a
+}
 foo $a
