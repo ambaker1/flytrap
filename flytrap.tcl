@@ -16,7 +16,7 @@ namespace eval ::flytrap {
     # Internal variables
     variable baseLevel; # Level at which the debug command was called
     variable maxDepth; # Maximum debug depth
-    variable cmd; # Command passed to internal Debug command
+    variable debugBody; # Command passed to internal Debug command
     variable stack; # Stack of evaluation in debug
     variable verboseFlag; # Whether debug is verbose, or only prints on error.
     variable errorFile; # File that the error occurred on in "debug"
@@ -52,14 +52,14 @@ proc ::flytrap::> {args} {
 # If verbose, prints out everything. If not, only the commands up to an error.
 #
 # Arguments:
-# script:       Script to step through
+# body:         Script to step through
 # depth:        Debug depth. Default 0. Steps into procedures if > 0
 # verbose:      To print out commands and intermediate steps. Default 0
 
-proc ::flytrap::debug {script {depth 0} {verbose 0}} {
+proc ::flytrap::debug {body {depth 0} {verbose 0}} {
     variable baseLevel [info level]
     variable maxDepth $depth
-    variable cmd ""
+    variable debugBody $body
     variable stack ""
     variable verboseFlag $verbose
     variable errorFile ""
@@ -70,43 +70,29 @@ proc ::flytrap::debug {script {depth 0} {verbose 0}} {
     if {![string is integer $depth] || $depth < 0} {
         return -code error "Depth must be integer >= 0"
     }
-    
-    # Split script by newline and semi-colon, and parse for valid Tcl commands
-    foreach line [split $script \n;] {
-        # Trim leading and tailing white-space
-        set line [string trim $line]
-        if {$line ne ""} {
-            append cmd $line
-            if {[info complete $cmd]} {
-                # Evaluate command with recursive execution trace
-                set code [catch {Debug $cmd} result options]
-                if {$code != 0} {
-                    # Allow user to diagnose error
-                    if {!$verboseFlag} {
-                        foreach line $stack {
-                            lassign $line type depth string
-                            set prefix [string repeat "  " $depth]
-                            switch $type {
-                                enter {puts "$prefix> $string"}
-                                leave {puts "$prefix$string"}
-                            }
-                        }
-                    }
-                    set ::errorInfo $result
-                    set ::errorCode $code
-                    puts "ERROR, PAUSED..."
-                    puts "File: $errorFile"
-                    puts "Line: $errorLine"
-                    uplevel 1 [list ::wob::mainLoop break]
-                    return -options $options $result
+
+    # Evaluate command with recursive execution trace
+    set code [catch {Debug $debugBody} result options]
+    if {$code != 0} {
+        # Allow user to diagnose error
+        if {!$verboseFlag} {
+            foreach line $stack {
+                lassign $line type depth string
+                set prefix [string repeat "  " $depth]
+                switch $type {
+                    enter {puts "$prefix> $string"}
+                    leave {puts "$prefix$string"}
                 }
-                # puts $bar
-                set cmd ""
-            } else {
-                append cmd \n
-            }; # end if complete
-        }; # end if not blank
-    }; # end foreach line
+            }
+        }
+        set ::errorInfo $result
+        set ::errorCode $code
+        puts "ERROR, PAUSED..."
+        puts "File: $errorFile"
+        puts "Line: $errorLine"
+        uplevel 1 [list ::wob::mainLoop break]
+        return -options $options $result
+    }
 }
 
 # Debug --
@@ -114,9 +100,9 @@ proc ::flytrap::debug {script {depth 0} {verbose 0}} {
 # Private procedure to debug each line. Traced by EnterStep and LeaveStep
 #
 # Arguments:
-# cmd:          Command to step through
+# body:         Body of code to evaluate
 
-proc ::flytrap::Debug {cmd} {uplevel 2 $cmd}
+proc ::flytrap::Debug {body} {uplevel 2 $body}
 
 # EnterStep --
 # 
@@ -125,12 +111,12 @@ proc ::flytrap::Debug {cmd} {uplevel 2 $cmd}
 proc ::flytrap::EnterStep {cmdString args} {
     variable baseLevel
     variable maxDepth
-    variable cmd
+    variable debugBody
     variable verboseFlag
     variable stack
     set depth [expr {[info level] - $baseLevel}]
     if {$depth <= $maxDepth} {
-        if {$cmdString ne [list uplevel 2 $cmd]} {
+        if {$cmdString ne [list uplevel 2 $debugBody]} {
             if {$verboseFlag} {
                 set prefix [string repeat "  " $depth]
                 puts "$prefix> $cmdString"
@@ -148,7 +134,7 @@ proc ::flytrap::EnterStep {cmdString args} {
 proc ::flytrap::LeaveStep {cmdString code result args} {
     variable baseLevel
     variable maxDepth
-    variable cmd
+    variable debugBody
     variable stack
     variable verboseFlag
     variable errorFile
@@ -159,7 +145,7 @@ proc ::flytrap::LeaveStep {cmdString code result args} {
     }
     set depth [expr {[info level] - $baseLevel}]
     if {$depth <= $maxDepth} {
-        if {$cmdString ne [list uplevel 2 $cmd]} {
+        if {$cmdString ne [list uplevel 2 $debugBody]} {
             if {$verboseFlag} {
                 set prefix [string repeat "  " $depth]
                 puts "$prefix$result"
@@ -168,7 +154,7 @@ proc ::flytrap::LeaveStep {cmdString code result args} {
             }
         }; # end if command not main uplevel
     }; # end if valid depth
-    if {$code != 0} {
+    if {$code == 1} {
         set frameInfo [info frame 1]
         set errorFile [dict get $frameInfo file]
         set errorLine [dict get $frameInfo line]
