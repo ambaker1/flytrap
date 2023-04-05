@@ -20,11 +20,13 @@ namespace eval ::flytrap {
     variable stack; # Stack of evaluation in debug
     variable errorStack; # Commands evaluated before error
     variable verboseFlag; # Whether debug is verbose, or only prints on error.
+    variable excludeList {catch try}; # Commands to ignore when in debug
 
     # Exported commands
+    namespace export flytrap; # Source file and catch any bugs
+    namespace export debug; # Run script and catch bugs
+    namespace export pause; # Show file and line and enter interactive mode
 	namespace export >; # Print command and result, similar to interactive mode
-	namespace export debug; # Run file line-by-line, printing out results
-	namespace export pause; # Show file and line and enter interactive mode
 	namespace export pvar; # Print variables with their values
 	namespace export assert; # Throw error if result is not expected
 	namespace export viewVars; # Open a variable viewer
@@ -44,20 +46,28 @@ proc ::flytrap::> {args} {
     return $result
 }
 
+# flytrap --
+#
+# Special case of "debug", but only for files
+
+proc ::flytrap::flytrap {filename {depth 0} {verbose 0}} {
+    tailcall debug [list source $filename] $depth $verbose
+}
+
 # debug --
 #
 # Step through a script, expanding out all commands using enter/leave traces
 # If verbose, prints out everything. If not, only the commands up to an error.
 #
 # Arguments:
-# filename:     File to source and debug
+# body:         File to source and debug
 # depth:        Debug depth. Default 0. Steps into procedures if > 0
 # verbose:      To print out commands and intermediate steps. Default 0
 
-proc ::flytrap::debug {filename {depth 0} {verbose 0}} {
+proc ::flytrap::debug {body {depth 0} {verbose 0}} {
     variable baseLevel [info level]
     variable maxDepth $depth
-    variable debugBody [list source $filename]
+    variable debugBody $body
     variable stack ""
     variable verboseFlag $verbose
     variable errorStack ""
@@ -99,6 +109,7 @@ proc ::flytrap::EnterStep {cmdString args} {
     variable errorStack
     set depth [expr {[info level] - $baseLevel}]
     if {$depth <= $maxDepth} {
+        # NOTE: HAVE BETTER CONTROL METHOD TO AVOID PRINTING "UPLEVEL 2 ..."
         if {$cmdString ne [list uplevel 2 $debugBody]} {
             if {$verboseFlag} {
                 set prefix [string repeat "  " $depth]
@@ -123,13 +134,14 @@ proc ::flytrap::LeaveStep {cmdString code result args} {
     variable stack
     variable verboseFlag
     variable errorStack
+    variable excludeList
     set depth [expr {[info level] - $baseLevel}]
     if {$depth <= $maxDepth} {
         # Handle command and error stacks
         if {$cmdString ne [list uplevel 2 $debugBody]} {
             if {$verboseFlag} {
                 set prefix [string repeat "  " $depth]
-                puts "$prefix$result"
+                if {$result ne ""} {puts "$prefix$result"}
             } else {
                 lappend stack [list leave $depth $result]
             }
@@ -138,8 +150,8 @@ proc ::flytrap::LeaveStep {cmdString code result args} {
         # Process error not controlled by "catch"
         if {$code == 1} {
             # Verify that it is not wrapped by a built-in error handler
-            foreach cmdString $errorStack {
-                if {[lindex $cmdString 0] in {catch try}} {
+            foreach command $errorStack {
+                if {[lindex $command 0] in $excludeList} {
                     return
                 }
             }
@@ -168,15 +180,15 @@ proc ::flytrap::LeaveStep {cmdString code result args} {
                     set prefix [string repeat "  " $depth]
                     switch $type {
                         enter {puts "$prefix> $string"}
-                        leave {puts "$prefix$string"}
+                        leave {if {$result ne ""} {puts "$prefix$string"}}
                     }
                 }
             }
-            puts $errorStack
-            # Enter interactive mode to troubleshoot
-            puts "ERROR, PAUSED..."
-            puts "File: [dict get $frame file]"
-            puts "Line: [dict get $frame line]"
+            # Save data to error variables and enter interactive mode
+            set ::errorCode $code
+            set ::errorInfo $result
+            puts "ERROR..."
+            puts "(file \"[dict get $frame file]\" line [dict get $frame line])"
             uplevel 1 [list ::wob::mainLoop break]
             trace remove execution Debug enterstep ::flytrap::EnterStep
             trace remove execution Debug leavestep ::flytrap::LeaveStep
@@ -193,25 +205,14 @@ proc ::flytrap::LeaveStep {cmdString code result args} {
 # To pass results to caller, use return.
 
 proc ::flytrap::pause {} {
-    # Get frame info, and check for error
-    set i 1
-    while {1} {
-        if {[catch {set frame [info frame -$i]}]} {
-            # Cannot pause from command window
-            return
-        } 
-        if {[dict get $frame type] eq "source"} {
-            break
-        }
-        incr i
+    # Get frame info of caller and throw error if 
+    set frame [info frame -1]; # Get frame info of caller
+    if {[dict get $frame type] ne "source"} {
+        # Return if in interactive mode
+        return
     }
-    # NOTE: NEED TO MAKE SURE THAT PAUSE WORKS WITHIN "debug"
-    # puts [uplevel 1 [list info script]]
-    
-    # Wait for user input, evaluate user commands.
     puts "PAUSED..."
-    puts "File: [dict get $frame file]"
-    puts "Line: [dict get $frame line]"
+    puts "(file \"[dict get $frame file]\" line [dict get $frame line])"
     uplevel 1 [list ::wob::mainLoop break]
 }
 
