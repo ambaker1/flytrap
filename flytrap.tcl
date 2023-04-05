@@ -182,9 +182,9 @@ proc ::flytrap::LeaveStep {cmdString code result args} {
 
             # Get location of error from frame stack
             set foundError 0; # Flag for if the error was found in the stack
-            set procLine 0; # Line of proc where error occurred
-            set fileLine 0; # Line of file where error occurred
-            set evalLine 1; # Line number of outer eval below proc or file
+            set errorLine 0; # Line in file or proc where error occurred
+            set evalLine 1; # Line number of outer eval in proc or file
+            set prefix ""; # Prefix for puts statement
             for {set i 1} {$i < [info frame]} {incr i} {
                 set frame [info frame -$i]
                 if {[dict get $frame type] eq "precompiled"} {
@@ -200,24 +200,22 @@ proc ::flytrap::LeaveStep {cmdString code result args} {
                     }
                     continue
                 }
-                # Looking for file frame and proc frame
+                # Looking for file frame or proc frame
                 switch [dict get $frame type] {
                     source {
                         # Skip flytrap library file
                         if {[dict get $frame file] eq $myLocation} {
                             continue
                         }
-                        set errorFile [dict get $frame file]
-                        set fileLine [dict get $frame line]
+                        set prefix "file \"[dict get $frame file]\" line"
+                        set errorLine [dict get $frame line]
                         break
                     }
                     proc {
-                        # Only look at inner-most proc
-                        if {$errorProc ne ""} {
-                            continue
-                        }
-                        set errorProc [dict get $frame proc]
-                        set procLine [dict get $frame line]
+                        # Only applicable for interactive mode
+                        set prefix "proc [dict get $frame proc] line"
+                        set errorLine [dict get $frame line]
+                        break
                     }
                     eval {
                         # Handle index starting at 1 for nested evals
@@ -226,20 +224,13 @@ proc ::flytrap::LeaveStep {cmdString code result args} {
                     }
                 }
             }
+            # Adjust errorLine for any evals
+            incr errorLine $evalLine
+            incr errorLine -1; # index starts at 1
             
-            # Print line and file of error
+            # Print error line information
             puts "ERROR..."
-            if {$procLine != 0} {
-                incr procLine [expr {$evalLine - 1}]
-                puts "(file \"$errorProc\" line $procLine)"
-            }
-            if {$fileLine != 0} {
-                incr fileLine [expr {$evalLine - 1}]
-                puts "(file \"$errorFile\" line $fileLine)"
-            }
-            if {$procLine == 0 && $fileLine == 0} {
-                puts "(line $evalLine)"
-            }
+            puts "($prefix $errorLine)"
             
             # Enter interactive mode, similar to "pause"
             uplevel 1 [list ::wob::mainLoop break]
