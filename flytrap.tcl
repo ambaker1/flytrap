@@ -181,65 +181,64 @@ proc ::flytrap::LeaveStep {cmdString code result args} {
             }
 
             # Get location of error from frame stack
-            set state 0
-            set errorProc ""; # only for interactive mode
+            set foundError 0; # Flag for if the error was found in the stack
+            set procLine 0; # Line of proc where error occurred
+            set fileLine 0; # Line of file where error occurred
+            set evalLine 1; # Line number of outer eval below proc or file
             for {set i 1} {$i < [info frame]} {incr i} {
                 set frame [info frame -$i]
-                if {$state == 0} {
-                    # Looking for "LeaveStep" frame
+                if {[dict get $frame type] eq "precompiled"} {
+                    continue
+                }
+                # Looking for "LeaveStep" frame
+                if {!$foundError} {
                     if {[dict get $frame type] eq "eval"} {
                         set frameCmd [lindex [dict get $frame cmd] 0]
                         if {$frameCmd eq "::flytrap::LeaveStep"} {
-                            incr state
+                            set foundError 1
                         }
                     }
-                } elseif {$state == 1} { 
-                    # Getting error frame
-                    set errorLine [dict get $frame line]
-                    if {[dict get $frame type] eq "source"} {
-                        set errorFile [dict get $frame file]
-                        break
-                    }
-                    incr state
-                } elseif {$state == 2} { 
-                    # Looking for file frame (ignore flytrap library file)
-                    set frameType [dict get $frame type]
-                    switch $frameType {
-                        source {
-                            set errorFile [dict get $frame file]
-                            if {$errorFile eq $myLocation} {
-                                continue
-                            }
-                        }
-                        proc {
-                            set errorProc [dict get $frame proc]
-                        }
-                        eval {}
-                        precompiled {
+                    continue
+                }
+                # Looking for file frame and proc frame
+                switch [dict get $frame type] {
+                    source {
+                        # Skip flytrap library file
+                        if {[dict get $frame file] eq $myLocation} {
                             continue
                         }
-                    }
-                    # Add to error line number
-                    incr errorLine [dict get $frame line]
-                    incr errorLine -1
-                    # Exit if found file
-                    if {$frameType eq "source"} {
+                        set errorFile [dict get $frame file]
+                        set fileLine [dict get $frame line]
                         break
+                    }
+                    proc {
+                        # Only look at inner-most proc
+                        if {$errorProc ne ""} {
+                            continue
+                        }
+                        set errorProc [dict get $frame proc]
+                        set procLine [dict get $frame line]
+                    }
+                    eval {
+                        # Handle index starting at 1 for nested evals
+                        incr evalLine [dict get $frame line]
+                        incr evalLine -1
                     }
                 }
             }
             
             # Print line and file of error
             puts "ERROR..."
-            if {$i == [info frame]} {
-                # Special case: debug called from command line
-                if {$errorProc ne ""} {
-                    puts "(proc $errorProc line $errorLine)"
-                } else {
-                    puts "(line $errorLine)"
-                }
-            } else {
-                puts "(file \"$errorFile\" line $errorLine)"
+            if {$procLine != 0} {
+                incr procLine [expr {$evalLine - 1}]
+                puts "(file \"$errorProc\" line $procLine)"
+            }
+            if {$fileLine != 0} {
+                incr fileLine [expr {$evalLine - 1}]
+                puts "(file \"$errorFile\" line $fileLine)"
+            }
+            if {$procLine == 0 && $fileLine == 0} {
+                puts "(line $evalLine)"
             }
             
             # Enter interactive mode, similar to "pause"
