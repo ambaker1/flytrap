@@ -23,6 +23,12 @@ namespace eval ::flytrap {
     variable errorStack; # Commands evaluated before error
     variable excludeList {catch try}; # Commands to ignore when in debug
     variable myLocation [file normalize [info script]]; # library file path
+    variable tclvars; # https://www.tcl-lang.org/man/tcl/TclCmd/tclvars.htm
+    # Get list of tclvars from a child interpreter.
+    set child [interp create]
+    set tclvars [$child eval {info vars}]
+    interp delete $child
+    unset child
 
     # Exported commands
     namespace export flytrap; # Source file and catch any bugs
@@ -32,6 +38,7 @@ namespace eval ::flytrap {
 	namespace export pvar; # Print variables with their values
 	namespace export assert; # Throw error if result is not expected
 	namespace export viewVars; # Open an interactive variable viewer widget
+    namespace export workspace; # Get list of variables in scope (minus tclvars)
 }
 
 # flytrap --
@@ -317,7 +324,7 @@ proc ::flytrap::assert {value {op ==} {expected true}} {
 # Open a Tk table to view all variables in current scope, allowing for 
 # selection and copying. Requires package Tktable and dependent packages
 
-proc ::flytrap::viewVars {} {    
+proc ::flytrap::viewVars {args} {
     # Create widget interpreter and ensure required packages are available
     set widget [::wob::widget new "Workspace"]
     $widget eval {package require Tktable}
@@ -326,9 +333,14 @@ proc ::flytrap::viewVars {} {
     set cells(0,0) "Variable"
     set cells(0,1) "Value"
     
-    # Fill with sorted variables and values (not tclVars)
+    # Fill with sorted variables and values
+    if {[llength $args] == 0} {
+        set vars [uplevel 1 ::flytrap::workspace]
+    } else {
+        set vars $args
+    }
     set i 1
-    foreach var [lsort [uplevel 1 info vars]] {
+    foreach var [lsort $vars] {
         if {[uplevel 1 [list array exists $var]]} {
             # Array case
             foreach key [lsort [uplevel 1 [list array names $var]]] {
@@ -386,6 +398,23 @@ proc ::flytrap::viewVars {} {
     }
     
     return
+}
+
+# workspace --
+#
+# Get list of variables defined in current scope (minus tclvars)
+
+proc ::flytrap::workspace {} {
+    variable tclvars
+    set vars [uplevel 1 {info vars}]
+    # Filter out tclvars
+    if {[info level] == 1} {
+        foreach tclvar $tclvars {
+            set i [lsearch -exact $vars $tclvar]
+            set vars [lreplace $vars $i $i]
+        }
+    }
+    return $vars
 }
 
 # Finally, provide the package
