@@ -1,6 +1,9 @@
 working/**
 build/**
 doc/**
-!doc/dbug.tex
+!doc/flytrap.tex
+!doc/flytrap.pdf
+!doc/figures/
+!doc/figures/*.png
 !doc/template/
 !doc/template/*.tex
