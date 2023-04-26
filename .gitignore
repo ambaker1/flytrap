@@ -1,4 +1,5 @@
-releases/**
+working/**
+build/**
 doc/**
 !doc/dbug.tex
 !doc/template/
