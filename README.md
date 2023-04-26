@@ -11,6 +11,6 @@ This package is a Tin package. Tin makes installing Tcl packages easy, and is av
 After installing Tin, either download the latest release of flytrap and run "install.tcl", or simply run the following script in a Tcl interpreter:
 ```tcl
 package require tin 0.4.2
-tin add -auto flytrap https://github.com/ambaker1/flytrap
+tin add -auto flytrap https://github.com/ambaker1/flytrap install.tcl
 tin install flytrap
 ```
