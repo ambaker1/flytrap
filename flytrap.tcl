@@ -245,8 +245,7 @@ proc ::flytrap::pause {} {
         return
     }
     puts "PAUSED..."
-    puts "file \"[dict get $frame file]\""
-    puts "line [dict get $frame line]"
+    puts "(line [dict get $frame line] file \"[dict get $frame file]\")"
     uplevel 1 [list ::wob::mainLoop break]
 }
 
