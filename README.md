@@ -1,7 +1,7 @@
 # flytrap
 Debugging tools for Tcl
 
-Walk through execution of Tcl code, pause your Tcl script and enter interactive mode, and other debugging and development tools. build unit tests.
+Walk through execution of Tcl code, pause your Tcl script and enter interactive mode, and other debugging and development tools.
 
 Full documentation [here](doc/flytrap.pdf).
  
