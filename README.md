@@ -3,7 +3,7 @@ Debugging tools for Tcl
 
 Walk through execution of Tcl code, pause your Tcl script and enter interactive mode, and other debugging and development tools.
 
-Full documentation [here](doc/flytrap.pdf).
+Full documentation [here](https://raw.githubusercontent.com/ambaker1/flytrap/main/doc/flytrap.pdf).
  
 ## Installation
 This package is a Tin package. Tin makes installing Tcl packages easy, and is available [here](https://github.com/ambaker1/Tin).
