@@ -1,8 +1,6 @@
-package require tin 0.4
-set config [dict create VERSION 0.1]
-tin bake src/flytrap.tin build/flytrap.tcl $config
-tin bake src/install.tin build/install.tcl $config
-tin bake src/pkgIndex.tin build/pkgIndex.tcl $config
+package require tin 0.5
+set config [dict create VERSION 0.1.1]
+tin bake src build $config
 
 set dir build
 source build/pkgIndex.tcl
@@ -13,14 +11,14 @@ namespace import flytrap::*
 flytrap -body {assert [expr {2 + 2}] == 4} 2 1
 
 # Ensure that the line numbers are correct
-assert [dict get [info frame 0] line] == 16
+assert [dict get [info frame 0] line] == 14
 
 proc foo {x} {
     return [expr {1/$x}]
 }
-puts "Error should be on line 22"
+puts "Error should be on line 20"
 catch {flytrap -body {foo 0}}
-puts "Error should be on line 19"
+puts "Error should be on line 17"
 catch {flytrap -body {foo 0} 1}
 
 puts "Error should be on line 8 of error_example.tcl"
