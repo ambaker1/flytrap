@@ -278,9 +278,9 @@ proc ::flytrap::pvar {args} {
 # Arguments:
 # value:        Value to compare
 # op:           Operator (using mathop namespace). Default ==
-# expected:     Expected value. Default true
+# expected:     Expected value. Default 1, for true
 
-proc ::flytrap::assert {value {op ==} {expected true}} {
+proc ::flytrap::assert {value {op ==} {expected 1}} {
     if {![::tcl::mathop::$op $value $expected]} {
         return -code error "assert \"$value $op $expected\" failed"
     }
