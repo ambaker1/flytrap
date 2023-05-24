@@ -200,8 +200,8 @@ proc ::flytrap::LeaveStep {cmdString code result args} {
                         break
                     }
                     proc {
-                        # Only applicable for interactive mode
-                        set suffix "proc [dict get $frame proc]"
+                        # Frame is a proc frame
+                        set suffix " proc [dict get $frame proc]"
                         set errorLine [dict get $frame line]
                         break
                     }
@@ -239,13 +239,40 @@ proc ::flytrap::LeaveStep {cmdString code result args} {
 
 proc ::flytrap::pause {} {
     # Get frame info of caller and throw error if 
-    set frame [info frame -1]; # Get frame info of caller
-    if {[dict get $frame type] ne "source"} {
-        # Return if in interactive mode
-        return
+    set evalLine 1; # Line number of outer eval in proc or file
+    set suffix ""; # Suffix for puts statement
+    for {set i 1} {$i < [info frame]} {incr i} {
+        set frame [info frame -$i]
+        set type [dict get $frame type]
+        # Looking for file frame or proc frame
+        switch $type {
+            source {
+                set suffix " file \"[dict get $frame file]\""
+                set pauseLine [dict get $frame line]
+                break
+            }
+            proc {
+                # Frame is a proc frame
+                set suffix " proc [dict get $frame proc]"
+                set pauseLine [dict get $frame line]
+                break
+            }
+            eval {
+                # Handle index starting at 1 for nested evals
+                set suffix " cmd \{[dict get $frame cmd]\}"
+                incr evalLine [dict get $frame line]
+                incr evalLine -1
+            }
+        }
     }
+    # Adjust pauseLine for any evals
+    incr pauseLine $evalLine
+    incr pauseLine -1; # index starts at 1
+    
+    # Print pause line information
     puts "PAUSED..."
-    puts "(line [dict get $frame line] file \"[dict get $frame file]\")"
+    puts "(line $pauseLine$suffix)"
+    # Enter interactive mode
     uplevel 1 [list ::wob::mainLoop break]
 }
 
@@ -376,4 +403,4 @@ proc ::flytrap::viewVars {args} {
 }
 
 # Finally, provide the package
-package provide flytrap 0.1.1
+package provide flytrap 0.1.2

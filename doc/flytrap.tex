@@ -64,7 +64,11 @@ flytrap -body {
 \end{example}
 \clearpage
 \section{Pausing a Script} 
-The \cmdlink{pause} command pauses a Tcl script, prints the file and line number, and enters command-line mode, allowing the user to query variables and insert code into an analysis. If the command entered while paused returns an error, the error message will be displayed and the script will remain paused. If the command entered is ``return'', the pause will be exited and the corresponding result and options will be passed to the caller. For example, a loop can be broken by entering \textit{return -code break} in pause mode. Pressing enter with no commands will simply continue the script.
+The \cmdlink{pause} command pauses a Tcl script, prints the file and line number, and enters command-line mode, allowing the user to query variables and insert code into an analysis. 
+If the command entered while paused returns an error, the error message will be displayed and the script will remain paused. 
+If the command entered is ``return'', the pause will be exited and the corresponding result and options will be passed to the caller. 
+For example, a loop can be broken by entering \textit{return -code break} in pause mode. 
+Pressing enter with no commands will simply continue the script.
 \begin{syntax}
 \command{pause}
 \end{syntax}
@@ -79,7 +83,8 @@ PAUSED...
 > 
 \end{lstlisting}
 \end{example}
-Note: The pause command cannot be used in interactive mode (no need to pause when in command-line mode), but a pause can be used within a pause.
+Note: If in interactive mode, there may not be a file to pause in. 
+In this case, it will list the procedure or script where the pause occurred.
 \clearpage
 
 \section{Unit Testing}
