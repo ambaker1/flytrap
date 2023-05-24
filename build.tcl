@@ -1,5 +1,5 @@
-package require tin 0.5
-set config [dict create VERSION 0.1.1]
+package require tin 0.6
+set config [dict create VERSION 0.1.2]
 tin bake src build $config
 
 set dir build
