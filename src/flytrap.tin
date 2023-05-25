@@ -87,16 +87,21 @@ proc ::flytrap::InterpretFrame {frame addLines} {
     variable INFO ""
     # Initialize info with line number (plus addLines)
     set line [dict get $frame line]
-    dict set INFO line [incr line $addLines]
+    dict set INFO line $line
+    dict incr INFO line $addLines
     # Get remainder of info depending on type
+    set type [dict get $frame type]
+    if {$type ne {eval}} {
+        set addLines 0
+    }
     set break 0
-    set addLines 0
-    switch [dict get $frame type] {
+    switch $type {
         source { # Frame is a file
             dict set INFO file "\"[dict get $frame file]\""
             set break 1
         }
         proc { # Frame is a proc frame
+            
             if {[dict exists $frame proc]} {
                 # Normal proc call
                 dict set INFO proc [dict get $frame proc]
@@ -112,10 +117,16 @@ proc ::flytrap::InterpretFrame {frame addLines} {
                     set break 1
                 }
             }
+            
         }
-        eval { # Frame is a command evaluation. Add lines to next frame.
-            dict set INFO cmd "\{[dict get $frame cmd]\}"
-            set addLines [expr {$line - 1}]
+        eval { # Frame is a command evaluation. 
+            set cmd [dict get $frame cmd]
+            # If not an "eval" or "uplevel", add to "addLines" 
+            if {[lindex $cmd 0] ni {eval uplevel}} {
+                incr addLines $line
+                incr addLines -1
+            }
+            dict set INFO cmd "\{$cmd\}"
         }
     }
     # Join the INFO dict, which preserves the quotes and braces
