@@ -14,6 +14,8 @@ package require wob 0.1
 # Define namespace
 namespace eval ::flytrap {
     # Internal variables
+    variable DEBUG 0; # For testing flytrap and pause (no interactive mode)
+    variable INFO ""; # Pause line info dictionary (defined in InterpretFrame)
     variable debugType; # -file or -body. For "flytrap" and "debug"
     variable debugBody; # Command passed to internal Eval command
     variable maxDepth; # Maximum debug depth
@@ -33,17 +35,102 @@ namespace eval ::flytrap {
     }
        
     # Exported commands
-    namespace export flytrap; # Catch bugs in a Tcl script
     namespace export pause; # Enter interactive mode in current level
+    namespace export flytrap; # Catch bugs in a Tcl script
 	namespace export pvar; # Print variables with their values
-	namespace export assert; # Throw error if result is not expected
 	namespace export viewVars; # Open an interactive variable viewer widget
+    namespace export assert; # Throw error if result is not expected
+}
+
+# pause --
+#
+# Pauses the script, states the source file and line number it is on, 
+# and then enters the event loop, processing user input.
+# Pressing enter continues the analysis.
+# To pass results to caller, use return.
+# When in DEBUG mode, does not pause, just returns INFO
+#
+# Syntax:
+# pause
+
+proc ::flytrap::pause {} {
+    variable DEBUG
+    variable INFO ""
+    # Get frame info of caller
+    set addLines 0; # Line number of outer eval in proc or file
+    for {set i 1} {$i < [info frame]} {incr i} {
+        lassign [InterpretFrame [info frame -$i] $addLines] break addLines
+        if {$break} break
+    }
+    # If DEBUG, just return the line info (for testing)
+    if {$DEBUG} {
+        return $INFO
+    }
+    # Print pause line information and enter interactive mode
+    puts "PAUSED...\n($INFO)"
+    uplevel 1 [list ::wob::mainLoop break]
+}
+
+# InterpretFrame --
+#
+# Private procedure used by both pause and flytrap to interpret frame info
+# Returns a list of whether to break, and the number of lines to add next.
+#
+# Syntax:
+# InterpretFrame $frame $addLines
+#
+# Arguments:
+# frame         Frame dictionary to interpret
+# addLines      Lines to add.
+
+proc ::flytrap::InterpretFrame {frame addLines} {
+    variable INFO ""
+    # Initialize info with line number (plus addLines)
+    set line [dict get $frame line]
+    dict set INFO line [incr line $addLines]
+    # Get remainder of info depending on type
+    set break 0
+    set addLines 0
+    switch [dict get $frame type] {
+        source { # Frame is a file
+            dict set INFO file "\"[dict get $frame file]\""
+            set break 1
+        }
+        proc { # Frame is a proc frame
+            if {[dict exists $frame proc]} {
+                # Normal proc call
+                dict set INFO proc [dict get $frame proc]
+            } elseif {[dict exists $frame method]} {
+                # TclOO method call
+                dict set INFO method [dict get $frame method]
+                dict set INFO class [dict get $frame class]
+                # In Tcl 8.6.10, there is no call frame for the file in 
+                # which the constructor is defined. And for the destructor,
+                # the calling file line number is -1. So simply return the
+                # line number in the constructor/destructor.
+                if {[dict get $frame method] in {<constructor> <destructor>}} {
+                    set break 1
+                }
+            }
+        }
+        eval { # Frame is a command evaluation. Add lines to next frame.
+            dict set INFO cmd "\{[dict get $frame cmd]\}"
+            set addLines [expr {$line - 1}]
+        }
+    }
+    # Join the INFO dict, which preserves the quotes and braces
+    set INFO [join $INFO]
+    # Return a boolean of whether to break out of the frame loop, and
+    # return the number of lines to add to the next loop iteration.
+    return [list $break $addLines]
 }
 
 # flytrap --
 #
 # Step through a script, expanding out all commands using enter/leave traces
 # If verbose, prints out everything. If not, only the commands up to an error.
+# When an error is encountered, it pauses there and displays the line INFO.
+# When in DEBUG mode, it does not pause, just catches the error and returns INFO
 # 
 # Syntax:
 # flytrap -file $filename <$depth> <$verbose> <$varName>
@@ -54,9 +141,10 @@ namespace eval ::flytrap {
 # script        Tcl script to eval (only with -body)
 # depth         Debug depth. Default 0. Steps into procedures if > 0
 # verbose       To print out commands and intermediate steps. Default 0
-# varName       Variable to store the info dictionary (what is displayed)
 
-proc ::flytrap::flytrap {type input {depth 0} {verbose 0} {varName ""}} {
+proc ::flytrap::flytrap {type input {depth 0} {verbose 0}} {
+    variable DEBUG
+    variable INFO ""
     variable debugType $type
     variable debugBody ""
     variable maxDepth $depth
@@ -64,12 +152,6 @@ proc ::flytrap::flytrap {type input {depth 0} {verbose 0} {varName ""}} {
     variable baseLevel [info level]
     variable stepHistory ""
     variable errorStack ""
-    
-    # Initialize info variable
-    if {$varName ne ""} {
-        upvar 1 $varName info
-        set info ""
-    }
     
     # Determine debugBody from debugType
     switch $debugType {
@@ -85,10 +167,14 @@ proc ::flytrap::flytrap {type input {depth 0} {verbose 0} {varName ""}} {
 
     # Evaluate command with recursive execution trace
     trace add execution Eval enterstep ::flytrap::EnterStep
-    trace add execution Eval leavestep [list ::flytrap::LeaveStep $varName]
+    trace add execution Eval leavestep ::flytrap::LeaveStep
     catch {Eval $debugBody} result options
     trace remove execution Eval enterstep ::flytrap::EnterStep
-    trace remove execution Eval leavestep [list ::flytrap::LeaveStep $varName]
+    trace remove execution Eval leavestep ::flytrap::LeaveStep
+    # Handle debug case
+    if {$DEBUG} {
+        return $INFO
+    }
     # Return normally to user
     return -options $options $result
 }
@@ -136,6 +222,8 @@ proc ::flytrap::EnterStep {cmdString args} {
 # Private procedure to print out results from intermediate steps
 
 proc ::flytrap::LeaveStep {cmdString code result args} {
+    variable DEBUG
+    variable INFO
     variable debugType
     variable debugBody
     variable maxDepth
@@ -158,11 +246,6 @@ proc ::flytrap::LeaveStep {cmdString code result args} {
         }; # end if command not main uplevel
         # Process error not controlled by "catch"
         if {$code == 1} {
-            # Set up info variable
-            if {$varName ne ""} {
-                upvar 1 $varName info
-            }
-        
             # Verify that it is not wrapped by a built-in error handler
             foreach command $errorStack {
                 if {[lindex $command 0] in $excludeList} {
@@ -198,103 +281,21 @@ proc ::flytrap::LeaveStep {cmdString code result args} {
                     }
                     continue
                 }
-                lassign [InterpretFrame $frame $addLines] info break addLines
+                lassign [InterpretFrame $frame $addLines] break addLines
                 if {$break} break
             }
             
             # Print error line information and enter interactive mode
-            puts "ERROR...\n($info)"
-            uplevel 1 [list ::wob::mainLoop break]
+            if {!$DEBUG} {
+                puts "ERROR...\n($INFO)"
+                uplevel 1 [list ::wob::mainLoop break]
+            }
             # Remove traces, which then unwinds the interpreter
             trace remove execution Eval enterstep ::flytrap::EnterStep
-            trace remove execution Eval leavestep \
-                    [list ::flytrap::LeaveStep $varName]
+            trace remove execution Eval leavestep ::flytrap::LeaveStep
         }
     }; # end if valid depth
     return
-}
-
-# pause --
-#
-# Pauses the script, states the source file and line number it is on, 
-# and then enters the event loop, processing user input.
-# Pressing enter continues the analysis.
-# To pass results to caller, use return.
-#
-# Syntax:
-# pause <$varName>
-#
-# Arguments:
-# varName       Variable to store the info dictionary (what is displayed)
-
-proc ::flytrap::pause {{varName ""}} {
-    # Set up info variable
-    if {$varName ne ""} {
-        upvar 1 $varName info
-    }
-    # Get frame info of caller and throw error if 
-    set addLines 0; # Line number of outer eval in proc or file
-    for {set i 1} {$i < [info frame]} {incr i} {
-        lassign [InterpretFrame [info frame -$i] $addLines] info break addLines
-        if {$break} break
-    }
-
-    # Print pause line information and enter interactive mode
-    puts "PAUSED...\n($info)"
-    uplevel 1 [list ::wob::mainLoop break]
-}
-
-# InterpretFrame --
-#
-# Private procedure used by both pause and flytrap to interpret frame info
-# Returns a list of the pause/flytrap info, whether to break, and the number
-# of lines to add to the next frame line.
-#
-# Syntax:
-# InterpretFrame $frame $addLines
-#
-# Arguments:
-# frame         Frame dictionary to interpret
-# addLines      Lines to add.
-
-proc ::flytrap::InterpretFrame {frame addLines} {
-    # Initialize info with line number (plus addLines)
-    set line [dict get $frame line]
-    dict set info line [incr line $addLines]
-    # Get remainder of info depending on type
-    set break 0
-    set addLines 0
-    switch [dict get $frame type] {
-        source { # Frame is a file
-            dict set info file "\"[dict get $frame file]\""
-            set break 1
-        }
-        proc { # Frame is a proc frame
-            if {[dict exists $frame proc]} {
-                # Normal proc call
-                dict set info proc [dict get $frame proc]
-            } elseif {[dict exists $frame method]} {
-                # TclOO method call
-                dict set info method [dict get $frame method]
-                dict set info class [dict get $frame class]
-                # In Tcl 8.6.10, there is no call frame for the file in 
-                # which the constructor is defined. And for the destructor,
-                # the calling file line number is -1. So simply return the
-                # line number in the constructor/destructor.
-                if {$method in {<constructor> <destructor>}} {
-                    set break 1
-                }
-            }
-        }
-        eval { # Frame is a command evaluation. Add lines to next frame.
-            dict set info cmd "\{[dict get $frame cmd]\}"
-            set addLines [expr {$line - 1}]
-        }
-    }
-    # Return the "joined" info, which preserves the quotes and braces
-    # Also return a boolean of whether to break out of the frame loop
-    # And return the number of lines to add to the next loop iteration.
-    return [list [join $info] $break $addLines]
 }
 
 # pvar --
@@ -317,21 +318,6 @@ proc ::flytrap::pvar {args} {
         }
     }
     return
-}
-
-# assert --
-#
-# Assert type or value, throwing error if result is not expected
-# 
-# Arguments:
-# value:        Value to compare
-# op:           Operator (using mathop namespace). Default ==
-# expected:     Expected value. Default 1, for true
-
-proc ::flytrap::assert {value {op ==} {expected 1}} {
-    if {![::tcl::mathop::$op $value $expected]} {
-        return -code error "assert \"$value $op $expected\" failed"
-    }
 }
 
 # viewVars --
@@ -421,6 +407,21 @@ proc ::flytrap::viewVars {args} {
     }
     
     return
+}
+
+# assert --
+#
+# Assert type or value, throwing error if result is not expected
+# 
+# Arguments:
+# value:        Value to compare
+# op:           Operator (using mathop namespace). Default ==
+# expected:     Expected value. Default 1, for true
+
+proc ::flytrap::assert {value {op ==} {expected 1}} {
+    if {![::tcl::mathop::$op $value $expected]} {
+        return -code error "assert \"$value $op $expected\" failed"
+    }
 }
 
 # Finally, provide the package
