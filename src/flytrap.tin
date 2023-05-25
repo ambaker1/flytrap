@@ -46,16 +46,17 @@ namespace eval ::flytrap {
 # If verbose, prints out everything. If not, only the commands up to an error.
 # 
 # Syntax:
-# flytrap -file $filename <$depth> <$verbose>
-# flytrap -body $script <$depth> <$verbose>
+# flytrap -file $filename <$depth> <$verbose> <$varName>
+# flytrap -body $script <$depth> <$verbose> <$varName>
 #
 # Arguments:
 # filename      File path of file to source (only with -file)
 # script        Tcl script to eval (only with -body)
 # depth         Debug depth. Default 0. Steps into procedures if > 0
 # verbose       To print out commands and intermediate steps. Default 0
+# varName       Variable to store the info dictionary (what is displayed)
 
-proc ::flytrap::flytrap {type input {depth 0} {verbose 0}} {
+proc ::flytrap::flytrap {type input {depth 0} {verbose 0} {varName ""}} {
     variable debugType $type
     variable debugBody ""
     variable maxDepth $depth
@@ -63,6 +64,12 @@ proc ::flytrap::flytrap {type input {depth 0} {verbose 0}} {
     variable baseLevel [info level]
     variable stepHistory ""
     variable errorStack ""
+    
+    # Initialize info variable
+    if {$varName ne ""} {
+        upvar 1 $varName info
+        set info ""
+    }
     
     # Determine debugBody from debugType
     switch $debugType {
@@ -78,10 +85,10 @@ proc ::flytrap::flytrap {type input {depth 0} {verbose 0}} {
 
     # Evaluate command with recursive execution trace
     trace add execution Eval enterstep ::flytrap::EnterStep
-    trace add execution Eval leavestep ::flytrap::LeaveStep
+    trace add execution Eval leavestep [list ::flytrap::LeaveStep $varName]
     catch {Eval $debugBody} result options
     trace remove execution Eval enterstep ::flytrap::EnterStep
-    trace remove execution Eval leavestep ::flytrap::LeaveStep
+    trace remove execution Eval leavestep [list ::flytrap::LeaveStep $varName]
     # Return normally to user
     return -options $options $result
 }
@@ -151,6 +158,11 @@ proc ::flytrap::LeaveStep {cmdString code result args} {
         }; # end if command not main uplevel
         # Process error not controlled by "catch"
         if {$code == 1} {
+            # Set up info variable
+            if {$varName ne ""} {
+                upvar 1 $varName info
+            }
+        
             # Verify that it is not wrapped by a built-in error handler
             foreach command $errorStack {
                 if {[lindex $command 0] in $excludeList} {
@@ -170,9 +182,7 @@ proc ::flytrap::LeaveStep {cmdString code result args} {
 
             # Get location of error from frame stack
             set foundError 0; # Flag for if the error was found in the stack
-            set errorLine 0; # Line in file or proc where error occurred
-            set evalLine 1; # Line number of outer eval in proc or file
-            set suffix ""; # Suffix for puts statement
+            set addLines 0; # Line number of outer eval in proc or file
             for {set i 1} {$i < [info frame]} {incr i} {
                 set frame [info frame -$i]
                 if {[dict get $frame type] eq "precompiled"} {
@@ -188,43 +198,17 @@ proc ::flytrap::LeaveStep {cmdString code result args} {
                     }
                     continue
                 }
-                # Looking for file frame or proc frame
-                switch [dict get $frame type] {
-                    source {
-                        # Skip flytrap library file
-                        if {[dict get $frame file] eq $myLocation} {
-                            continue
-                        }
-                        set suffix " file \"[dict get $frame file]\""
-                        set errorLine [dict get $frame line]
-                        break
-                    }
-                    proc {
-                        # Frame is a proc frame
-                        set suffix " proc [dict get $frame proc]"
-                        set errorLine [dict get $frame line]
-                        break
-                    }
-                    eval {
-                        # Handle index starting at 1 for nested evals
-                        incr evalLine [dict get $frame line]
-                        incr evalLine -1
-                    }
-                }
+                lassign [InterpretFrame $frame $addLines] info break addLines
+                if {$break} break
             }
-            # Adjust errorLine for any evals
-            incr errorLine $evalLine
-            incr errorLine -1; # index starts at 1
             
-            # Print error line information
-            puts "ERROR..."
-            puts "(line $errorLine$suffix)"
-            
-            # Enter interactive mode, similar to "pause"
+            # Print error line information and enter interactive mode
+            puts "ERROR...\n($info)"
             uplevel 1 [list ::wob::mainLoop break]
             # Remove traces, which then unwinds the interpreter
             trace remove execution Eval enterstep ::flytrap::EnterStep
-            trace remove execution Eval leavestep ::flytrap::LeaveStep
+            trace remove execution Eval leavestep \
+                    [list ::flytrap::LeaveStep $varName]
         }
     }; # end if valid depth
     return
@@ -236,44 +220,81 @@ proc ::flytrap::LeaveStep {cmdString code result args} {
 # and then enters the event loop, processing user input.
 # Pressing enter continues the analysis.
 # To pass results to caller, use return.
+#
+# Syntax:
+# pause <$varName>
+#
+# Arguments:
+# varName       Variable to store the info dictionary (what is displayed)
 
-proc ::flytrap::pause {} {
+proc ::flytrap::pause {{varName ""}} {
+    # Set up info variable
+    if {$varName ne ""} {
+        upvar 1 $varName info
+    }
     # Get frame info of caller and throw error if 
-    set evalLine 1; # Line number of outer eval in proc or file
-    set suffix ""; # Suffix for puts statement
+    set addLines 0; # Line number of outer eval in proc or file
     for {set i 1} {$i < [info frame]} {incr i} {
-        set frame [info frame -$i]
-        set type [dict get $frame type]
-        # Looking for file frame or proc frame
-        switch $type {
-            source {
-                set suffix " file \"[dict get $frame file]\""
-                set pauseLine [dict get $frame line]
-                break
-            }
-            proc {
-                # Frame is a proc frame
-                set suffix " proc [dict get $frame proc]"
-                set pauseLine [dict get $frame line]
-                break
-            }
-            eval {
-                # Handle index starting at 1 for nested evals
-                set suffix " cmd \{[dict get $frame cmd]\}"
-                incr evalLine [dict get $frame line]
-                incr evalLine -1
+        lassign [InterpretFrame [info frame -$i] $addLines] info break addLines
+        if {$break} break
+    }
+
+    # Print pause line information and enter interactive mode
+    puts "PAUSED...\n($info)"
+    uplevel 1 [list ::wob::mainLoop break]
+}
+
+# InterpretFrame --
+#
+# Private procedure used by both pause and flytrap to interpret frame info
+# Returns a list of the pause/flytrap info, whether to break, and the number
+# of lines to add to the next frame line.
+#
+# Syntax:
+# InterpretFrame $frame $addLines
+#
+# Arguments:
+# frame         Frame dictionary to interpret
+# addLines      Lines to add.
+
+proc ::flytrap::InterpretFrame {frame addLines} {
+    # Initialize info with line number (plus addLines)
+    set line [dict get $frame line]
+    dict set info line [incr line $addLines]
+    # Get remainder of info depending on type
+    set break 0
+    set addLines 0
+    switch [dict get $frame type] {
+        source { # Frame is a file
+            dict set info file "\"[dict get $frame file]\""
+            set break 1
+        }
+        proc { # Frame is a proc frame
+            if {[dict exists $frame proc]} {
+                # Normal proc call
+                dict set info proc [dict get $frame proc]
+            } elseif {[dict exists $frame method]} {
+                # TclOO method call
+                dict set info method [dict get $frame method]
+                dict set info class [dict get $frame class]
+                # In Tcl 8.6.10, there is no call frame for the file in 
+                # which the constructor is defined. And for the destructor,
+                # the calling file line number is -1. So simply return the
+                # line number in the constructor/destructor.
+                if {$method in {<constructor> <destructor>}} {
+                    set break 1
+                }
             }
         }
+        eval { # Frame is a command evaluation. Add lines to next frame.
+            dict set info cmd "\{[dict get $frame cmd]\}"
+            set addLines [expr {$line - 1}]
+        }
     }
-    # Adjust pauseLine for any evals
-    incr pauseLine $evalLine
-    incr pauseLine -1; # index starts at 1
-    
-    # Print pause line information
-    puts "PAUSED..."
-    puts "(line $pauseLine$suffix)"
-    # Enter interactive mode
-    uplevel 1 [list ::wob::mainLoop break]
+    # Return the "joined" info, which preserves the quotes and braces
+    # Also return a boolean of whether to break out of the frame loop
+    # And return the number of lines to add to the next loop iteration.
+    return [list [join $info] $break $addLines]
 }
 
 # pvar --
