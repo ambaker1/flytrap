@@ -311,24 +311,36 @@ proc ::flytrap::LeaveStep {cmdString code result args} {
 
 # pvar --
 #
-# Same idea as parray. Prints the value of a variable to screen.
-# If variable is array, parray will be called, with no pattern.
+# Same idea as parray. Prints the values of a variable to screen.
+#
+# Syntax:
+# pvar $varName ...
 #
 # Arguments:
-# args:         Names of variable to print
+# $varName ...      Names of variable to print
 
 proc ::flytrap::pvar {args} {
-    foreach arg $args {
-        upvar 1 $arg var
+    puts [uplevel 1 [list ::flytrap::PrintVars {*}$args]]
+}
+
+# PrintVars --
+#
+# Private procedure for testing (returns what is printed with "pvar")
+
+proc ::flytrap::PrintVars {args} {
+    foreach varName $args {
+        upvar 1 $varName var
         if {![info exists var]} {
-            return -code error "can't read \"$arg\": no such variable"
+            return -code error "can't read \"$varName\": no such variable"
         } elseif {[array exists var]} {
-            uplevel 1 [list parray $arg]
+            foreach {key value} [array get var] {
+                lappend varList [list "$varName\($key\)" = $value]
+            }
         } else {
-            puts "$arg = $var"
+            lappend varList [list $varName = $var]
         }
     }
-    return
+    join $varList \n
 }
 
 # viewVars --
