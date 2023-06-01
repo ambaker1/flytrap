@@ -9,7 +9,7 @@
 # redistribution, and for a DISCLAIMER OF ALL WARRANTIES.
 ################################################################################
 
-package require wob 0.1
+package require wob 0.2.1
 
 # Define namespace
 namespace eval ::flytrap {
@@ -25,21 +25,11 @@ namespace eval ::flytrap {
     variable errorStack; # Commands evaluated before error
     variable excludeList {catch try}; # Commands to ignore when in debug
     variable myLocation [file normalize [info script]]; # library file path
-    # tclvars: global variables used by Tcl
-    # https://www.tcl-lang.org/man/tcl/TclCmd/tclvars.htm
-    variable tclvars {
-        argc argv argv0 auto_index auto_path env errorCode errorInfo 
-        tcl_interactive tcl_library tcl_nonwordchars tcl_patchLevel 
-        tcl_pkgPath tcl_platform tcl_precision tcl_rcFileName 
-        tcl_traceCompile tcl_traceExec tcl_wordchars tcl_version
-    }
        
     # Exported commands
     namespace export pause; # Enter interactive mode in current level
     namespace export flytrap; # Catch bugs in a Tcl script
-	namespace export pvar; # Print variables with their values
 	namespace export viewVars; # Open an interactive variable viewer widget
-    namespace export assert; # Throw error if result is not expected
 }
 
 # pause --
@@ -57,11 +47,8 @@ proc ::flytrap::pause {} {
     variable DEBUG
     variable INFO ""
     # Get frame info of caller
-    set addLines 0; # Line number of outer eval in proc or file
-    for {set i 1} {$i < [info frame]} {incr i} {
-        lassign [InterpretFrame [info frame -$i] $addLines] break addLines
-        if {$break} break
-    }
+    set i [info frame]
+    set INFO [GetFrameInfo [incr i -1]]
     # If DEBUG, just return the line info (for testing)
     if {$DEBUG} {
         return $INFO
@@ -71,69 +58,77 @@ proc ::flytrap::pause {} {
     uplevel 1 [list ::wob::mainLoop break]
 }
 
-# InterpretFrame --
+# GetFrameInfo --
 #
-# Private procedure used by both pause and flytrap to interpret frame info
-# Returns a list of whether to break, and the number of lines to add next.
+# Private procedure used by both pause and flytrap to get frame info to display.
 #
 # Syntax:
-# InterpretFrame $frame $addLines
+# GetFrameInfo $frame $addLines
 #
 # Arguments:
 # frame         Frame dictionary to interpret
 # addLines      Lines to add.
 
-proc ::flytrap::InterpretFrame {frame addLines} {
-    variable INFO ""
-    # Initialize info with line number (plus addLines)
-    set line [dict get $frame line]
-    dict set INFO line $line
-    dict incr INFO line $addLines
-    # Get remainder of info depending on type
-    set type [dict get $frame type]
-    if {$type ne {eval}} {
-        set addLines 0
-    }
-    set break 0
-    switch $type {
-        source { # Frame is a file
-            dict set INFO file "\"[dict get $frame file]\""
-            set break 1
+proc ::flytrap::GetFrameInfo {min} {
+    variable DEBUG
+    set i $min; # Minimum frame number
+    set addLines 0
+    set lineInfo [dict create]
+    for {set i $min} {$i > 0} {incr i -1} {
+        set frame [info frame $i]
+        puts "$i: $frame"
+        set type [dict get $frame type]
+        if {$type eq "precompiled"} {
+            continue
         }
-        proc { # Frame is a proc frame
-            
-            if {[dict exists $frame proc]} {
-                # Normal proc call
-                dict set INFO proc [dict get $frame proc]
-            } elseif {[dict exists $frame method]} {
-                # TclOO method call
-                dict set INFO method [dict get $frame method]
-                dict set INFO class [dict get $frame class]
-                # In Tcl 8.6.10, there is no call frame for the file in 
-                # which the constructor is defined. And for the destructor,
-                # the calling file line number is -1. So simply return the
-                # line number in the constructor/destructor.
-                if {[dict get $frame method] in {<constructor> <destructor>}} {
-                    set break 1
-                }
+        set line [dict get $frame line]
+        incr line $addLines
+        set lineInfo [dict create line $line]
+        switch [dict get $frame type] {
+            source { # Frame is a source frame
+                set file [dict get $frame file]
+                dict set lineInfo file "\"$file\""
+                break
             }
-            
-        }
-        eval { # Frame is a command evaluation. 
-            set cmd [dict get $frame cmd]
-            # If not an "eval" or "uplevel", add to "addLines" 
-            if {[lindex $cmd 0] ni {eval uplevel}} {
+            proc { # Frame is a proc frame
+                if {[dict exists $frame proc]} {
+                    # Normal proc call
+                    dict set lineInfo proc [dict get $frame proc]
+                } elseif {[dict exists $frame method]} {
+                    # TclOO method call
+                    dict set lineInfo method [dict get $frame method]
+                    dict set lineInfo class [dict get $frame class]
+                    # In Tcl 8.6.10, there is no call frame for the file in 
+                    # which the constructor is defined. And for the destructor,
+                    # the calling file line number is -1. So simply return the
+                    # line number in the constructor/destructor.
+                    if {[dict get $frame method] in {
+                        <constructor> <destructor>
+                    }} then {
+                        break
+                    }
+                }
+                set addLines 0
+            }
+            eval { # Frame is a command evaluation. 
+                if {$evalLines == 0} {
+                    set cmd [dict get $frame cmd]
+                    dict set lineInfo cmd "\{$cmd\}"
+                }
+                
+                # This needs to work for both interp debug {} -frame 0 and 1
+                
+                if {[interp debug {}] eq "-frame 0"} {
+                    if {[lindex $cmd 0] in {eval uplevel}} {
+                        # continue
+                    }
+                }
                 incr addLines $line
                 incr addLines -1
             }
-            dict set INFO cmd "\{$cmd\}"
         }
     }
-    # Join the INFO dict, which preserves the quotes and braces
-    set INFO [join $INFO]
-    # Return a boolean of whether to break out of the frame loop, and
-    # return the number of lines to add to the next loop iteration.
-    return [list $break $addLines]
+    return [join $lineInfo]
 }
 
 # flytrap --
@@ -244,208 +239,139 @@ proc ::flytrap::LeaveStep {cmdString code result args} {
     variable errorStack
     variable excludeList
     variable myLocation
+    
     set depth [expr {[info level] - $baseLevel}]
-    if {$depth <= $maxDepth} {
-        # Handle command and error stacks
-        if {$cmdString ne [list uplevel 2 $debugBody]} {
-            set errorStack [lreplace $errorStack end end]; # pop
-            if {$verboseFlag} {
-                set prefix [string repeat "  " $depth]
-                if {$result ne ""} {puts "$prefix$result"}
-            }
-            lappend stepHistory leave $depth $result
-        }; # end if command not main uplevel
-        # Process error not controlled by "catch"
-        if {$code == 1} {
-            # Verify that it is not wrapped by a built-in error handler
-            foreach command $errorStack {
-                if {[lindex $command 0] in $excludeList} {
-                    return
-                }
-            }
-            # Print command history if not verbose
-            if {!$verboseFlag} {
-                foreach {type depth string} $stepHistory {
-                    set prefix [string repeat "  " $depth]
-                    switch $type {
-                        enter {puts "$prefix> $string"}
-                        leave {if {$result ne ""} {puts "$prefix$string"}}
-                    }
-                }
-            }
-
-            # Get location of error from frame stack
-            set foundError 0; # Flag for if the error was found in the stack
-            set addLines 0; # Line number of outer eval in proc or file
-            for {set i 1} {$i < [info frame]} {incr i} {
-                set frame [info frame -$i]
-                if {[dict get $frame type] eq "precompiled"} {
-                    continue
-                }
-                # Looking for "LeaveStep" frame
-                if {!$foundError} {
-                    if {[dict get $frame type] eq "eval"} {
-                        set frameCmd [lindex [dict get $frame cmd] 0]
-                        if {$frameCmd eq "::flytrap::LeaveStep"} {
-                            set foundError 1
-                        }
-                    }
-                    continue
-                }
-                lassign [InterpretFrame $frame $addLines] break addLines
-                if {$break} break
-            }
-            
-            # Print error line information and enter interactive mode
-            if {!$DEBUG} {
-                puts "ERROR...\n($INFO)"
-                uplevel 1 [list ::wob::mainLoop break]
-            }
-            # Remove traces, which then unwinds the interpreter
-            trace remove execution Eval enterstep ::flytrap::EnterStep
-            trace remove execution Eval leavestep ::flytrap::LeaveStep
+    if {$depth > $maxDepth} {
+        return
+    }
+    # Handle command and error stacks
+    if {$cmdString ne [list uplevel 2 $debugBody]} {
+        set errorStack [lreplace $errorStack end end]; # pop
+        if {$verboseFlag} {
+            set prefix [string repeat "  " $depth]
+            if {$result ne ""} {puts "$prefix$result"}
         }
-    }; # end if valid depth
-    return
-}
-
-# pvar --
-#
-# Same idea as parray. Prints the values of a variable to screen.
-#
-# Syntax:
-# pvar $varName ...
-#
-# Arguments:
-# $varName ...      Names of variable to print
-
-proc ::flytrap::pvar {args} {
-    puts [uplevel 1 [list ::flytrap::PrintVars {*}$args]]
-}
-
-# PrintVars --
-#
-# Private procedure for testing (returns what is printed with "pvar")
-
-proc ::flytrap::PrintVars {args} {
-    foreach varName $args {
-        upvar 1 $varName var
-        if {![info exists var]} {
-            return -code error "can't read \"$varName\": no such variable"
-        } elseif {[array exists var]} {
-            foreach {key value} [array get var] {
-                lappend varList [list "$varName\($key\)" = $value]
-            }
-        } else {
-            lappend varList [list $varName = $var]
+        lappend stepHistory leave $depth $result
+    }; # end if command not main uplevel
+    # If not an error, return
+    if {$code != 1} {
+        return
+    }
+    # Verify that the error is not wrapped by a built-in error handler
+    foreach command $errorStack {
+        if {[lindex $command 0] in $excludeList} {
+            return
         }
     }
-    join $varList \n
+    # Print command history if not verbose
+    if {!$verboseFlag} {
+        foreach {type depth string} $stepHistory {
+            set prefix [string repeat "  " $depth]
+            switch $type {
+                enter {puts "$prefix> $string"}
+                leave {if {$result ne ""} {puts "$prefix$string"}}
+            }
+        }
+    }
+
+    # Get location of error from frame stack
+    set i [info frame]
+    set INFO [GetFrameInfo [incr i -2]]; # -1 is LeaveStep. -2 is the user code
+    # Print error line information and enter interactive mode
+    if {!$DEBUG} {
+        puts "ERROR...\n($INFO)"
+        uplevel 1 [list ::wob::mainLoop break]
+    }
+    # Remove traces, which then unwinds the interpreter
+    trace remove execution Eval enterstep ::flytrap::EnterStep
+    trace remove execution Eval leavestep ::flytrap::LeaveStep
+
+    return
 }
 
 # viewVars --
 #
-# Open a Tk table to view all variables in current scope, allowing for 
-# selection and copying. Requires package Tktable and dependent packages
+# Widget for viewing variables. Requires package Tktable
+#
+# Syntax:
+# viewVars <$varList>
+#
+# Arguments:
+# varList       Variables to view. By default, "info vars"
 
 proc ::flytrap::viewVars {args} {
-    variable tclvars
     # Create widget interpreter and ensure required packages are available
+    if {[llength $args] == 0} {
+        set varList [uplevel 1 {info vars}]
+    } elseif {[llength $args] == 1} {
+        set varList [lindex $args 0]
+    } else {
+        ::errmsg::wrongNumArgs "viewVars ?varList?"
+    }
+    
+    # Create widget and require Tktable.
     set widget [::wob::widget new "Workspace"]
     $widget eval {package require Tktable}
     
-    # Initialize cells with header
-    set cells(0,0) "Variable"
-    set cells(0,1) "Value"
+    # Initialize cells with headers
+    $widget set cells(0,0) "Variable"
+    $widget set cells(0,1) "Value"
     
     # Fill with sorted variables and values
-    if {[llength $args] == 0} {
-        set vars [uplevel 1 {info vars}]
-        # Filter out tclvars
-        if {[info level] == 1} {
-            foreach tclvar $tclvars {
-                set i [lsearch -exact $vars $tclvar]
-                set vars [lreplace $vars $i $i]
-            }
-        }
-    } else {
-        set vars $args
-    }
     set i 1
-    foreach var [lsort $vars] {
-        if {[uplevel 1 [list array exists $var]]} {
+    foreach varName $varList {
+        upvar 1 $varName var
+        if {![info exists var]} {
+            $widget destroy
+            return -code error "$varName does not exist"
+        }
+        if {[array exists var]} {
             # Array case
-            foreach key [lsort [uplevel 1 [list array names $var]]] {
-                set cells($i,0) "$var\($key\)"
-                set cells($i,1) [uplevel 1 [list subst "$\{$var\($key\)\}"]]
+            foreach key [lsort [array names var]] {
+                $widget set cells($i,0) ${varName}($key)
+                $widget vlink var($key) cells($i,1)
                 incr i
             }
         } else {
             # Scalar case
-            set cells($i,0) $var
-            set cells($i,1) [uplevel 1 [list subst "$\{$var\}"]]
+            $widget set cells($i,0) $varName
+            $widget vlink var cells($i,1)
             incr i
         }
     }
     
-    # Pass cells to widget interpreter
-    $widget eval [list array set cells [array get cells]]
-    
     # Create workspace widget
     $widget eval {
-        # Modify the clipboard function to copy correctly from table
-        trace add execution clipboard leave TrimClipBoard
-        proc TrimClipBoard {cmdString args} {
-            if {[lindex $cmdString 1] eq "append"} {
-                set clipboard [clipboard get]
-                clipboard clear
-                clipboard append [join [join $clipboard]]
-            }
-        }
-
         # Create frame, scroll bar, and button
         frame .f -bd 2 -relief groove
         scrollbar .f.sbar -command {.f.tbl yview}
         
         # Create table
-        table .f.tbl -rows [expr {[array size cells]/2}] -cols 2 \
-                -titlerows 1 -height 10 -width 2 \
-                -yscrollcommand {.f.sbar set} -invertselected 1 \
-                -variable cells -state disabled -wrap 1 \
-                -rowstretchmode unset -colstretchmode all
+        set n [expr {[array size cells]/2}]
+        table .f.tbl -rows $n -cols 2 -yscrollcommand {.f.sbar set}
+        .f.tbl configure -titlerows 1 -titlecols 1 -height 10 -width 2
+        .f.tbl configure -anchor nw  -multiline 0 -ellipsis "..."
+        .f.tbl configure -rowseparator " " -colseparator "\n"
+        .f.tbl configure -selectmode single -invertselected 1 
+        .f.tbl configure -variable cells -state disabled
+        .f.tbl configure -rowstretchmode all; # stretches all rows
+        .f.tbl configure -colstretchmode unset; # only stretches value col
         .f.tbl tag configure active -fg black
         .f.tbl height 0 1; # Height of title row 
-        .f.tbl width 0 20 1 40; # Width of var and val columns
+        .f.tbl width 0 25 1 50; # Width of var and val columns
 
         # Arrange widget
-        grid .f -column 0 -row 0 -columnspan 2 -rowspan 1 -sticky nsew
+        grid .f -column 0 -row 0 -columnspan 2 -rowspan 2 -sticky nsew
         grid .f.tbl -column 0 -row 1 -columnspan 1 -rowspan 1 -sticky nsew
         grid .f.sbar -column 1 -row 1 -columnspan 1 -rowspan 1 -sticky ns
         grid columnconfigure . all -weight 1
         grid rowconfigure . all -weight 1
         grid columnconfigure .f .f.tbl -weight 1
         grid rowconfigure .f .f.tbl -weight 1
-        # Wait for user to close widget
-        vwait forever
     }
-    
-    return
+    return $widget
 }
 
-# assert --
-#
-# Assert type or value, throwing error if result is not expected
-# 
-# Arguments:
-# value:        Value to compare
-# op:           Operator (using mathop namespace). Default ==
-# expected:     Expected value. Default 1, for true
-
-proc ::flytrap::assert {value {op ==} {expected 1}} {
-    if {![::tcl::mathop::$op $value $expected]} {
-        return -code error [list assert $value $op $expected failed]
-    }
-}
 
 # Finally, provide the package
 package provide flytrap @VERSION@
