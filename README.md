@@ -1,8 +1,6 @@
 # flytrap
 Debugging tools for Tcl
 
-Walk through execution of Tcl code, pause your Tcl script and enter interactive mode, and other debugging and development tools.
-
 Full documentation [here](https://raw.githubusercontent.com/ambaker1/flytrap/main/doc/flytrap.pdf).
  
 ## Installation
