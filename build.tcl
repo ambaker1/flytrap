@@ -1,5 +1,5 @@
 package require tin 0.6
-set config [dict create VERSION 0.1.3]
+set config [dict create VERSION 0.2]
 tin bake src build $config
 
 set dir build
@@ -19,7 +19,7 @@ puts "ALL TESTS PASSED!"
 set ::flytrap::DEBUG 0
 puts "Press Enter to Update Main Files and Install"
 pause
-assert ::flytrap::INFO eq "line 21 file \"[file normalize [info script]]\""
+assert $::flytrap::INFO eq "line 21 file \"[file normalize [info script]]\""
 
 # Copy files over to main folder and install.
 file copy -force {*}[glob -directory build *] [pwd]
