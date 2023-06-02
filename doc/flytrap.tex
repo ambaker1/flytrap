@@ -87,4 +87,49 @@ flytrap -body {
 17
 \end{lstlisting}
 \end{example}
+
+\clearpage
+\section{Variable Viewer} 
+The command \cmdlink{varViewer} is a TclOO class that creates widget objects that display the values of variables. 
+\begin{syntax}
+\command{varViewer} new \$varList <\$title> \\
+varViewer create \$name \$varList <\$title> 
+\end{syntax}
+\begin{args}
+\$name & Object name. \\
+\$varList & List of variables to view. \\
+\$title & Optional title. Default ``Workspace''.
+\end{args}
+\begin{example}{Monitoring variable values}
+\begin{lstlisting}
+package require tin
+tin import flytrap
+set i 0
+set j 0
+varViewer new {i j}
+for {set i 0} {$i < 1000} {incr i} {
+    for {set j 0} {$j < 1000} {incr j} {
+        update
+    }
+}
+\end{lstlisting}
+\end{example}
+
+The command \cmdlink{viewVars} is short-hand for creating a \cmdlink{varViewer} object for all variables in the current scope.
+\begin{syntax}
+\command{viewVars}
+\end{syntax}
+
+\begin{example}{Workspace viewer}
+\begin{lstlisting}
+set a 5
+set b 7
+array set c {1 5 2 6}
+viewVars
+pause
+\end{lstlisting}
+\tcblower
+
+\includegraphics[width = 4in]{figures/workspace.png}
+\end{example}
 \end{document}
