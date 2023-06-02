@@ -10,7 +10,7 @@
 ################################################################################
 
 # Required packages
-package require wob 0.1
+package require wob 0.2.4
 
 # Define namespace
 namespace eval ::flytrap {
@@ -26,8 +26,10 @@ namespace eval ::flytrap {
     variable excludeList {catch try}; # Commands to ignore (for flytrap)
        
     # Exported commands
-    namespace export pause; # Enter interactive mode in current level
-    namespace export flytrap; # Catch bugs in a Tcl script
+    namespace export pause; # Enter interactive mode in current level.
+    namespace export flytrap; # Catch bugs in a Tcl script.
+    namespace export viewVars; # View all variables in current level.
+    namespace export varViewer; # Widget class for viewing variables.
 }
 
 # pause --
@@ -52,8 +54,11 @@ proc ::flytrap::pause {} {
         return $INFO
     }
     # Print pause line information and enter interactive mode
-    puts "PAUSED...\n($INFO)"
-    uplevel 1 [list ::wob::mainLoop break]
+    puts "PAUSED..."
+    if {$INFO ne ""} {
+        puts "($INFO)"
+    }
+    uplevel 1 {::wob::mainLoop break}
 }
 
 # GetLineInfo --
@@ -61,16 +66,18 @@ proc ::flytrap::pause {} {
 # Private procedure used by both pause and flytrap to get frame info to display.
 #
 # Syntax:
-# GetLineInfo $max
+# GetLineInfo $maxFrame
 #
 # Arguments:
-# max       Maximum frame (absolute reference)
+# maxFrame     Maximum frame (absolute reference)
 
-proc ::flytrap::GetLineInfo {max} {
+proc ::flytrap::GetLineInfo {maxFrame} {
     set evalLines 0
-    for {set i $max} {$i > 0} {incr i -1} {
+    set lineInfo ""
+    # Step through frames, up to top-level
+    for {set frame $maxFrame} {$frame > 0} {incr frame -1} {
         # Get frame dictionary
-        set frameInfo [info frame $i]
+        set frameInfo [info frame $frame]
         
         # Skip flytrap-specific commands
         if {[dict exists $frameInfo proc]} {
@@ -88,6 +95,12 @@ proc ::flytrap::GetLineInfo {max} {
                     continue
                 }
             }
+            # Called within interactive "mainLoop"
+            if {[dict get $frameInfo proc] eq "::wob::mainLoop"} {
+                if {$::wob::interactive} {
+                    break
+                }
+            }
         }
         
         # Skip precompiled code
@@ -95,15 +108,22 @@ proc ::flytrap::GetLineInfo {max} {
             continue
         }
         
+        # Skip if "eval" frame when eval was already found
+        if {[dict get $frameInfo type] eq "eval" && $evalLines > 0} {
+            continue
+        }
+            
         # Get line and initialize lineInfo dictionary
-        set line [dict get $frameInfo line]
-        set lineInfo [dict create line $line]
-        
+        set lineInfo ""
+        dict set lineInfo line [dict get $frameInfo line]
+        if {$evalLines > 1} {
+            dict incr lineInfo line $evalLines
+            dict incr lineInfo line -1
+        }
         # Switch for frame type
         switch [dict get $frameInfo type] {
             source { # Frame is a source frame
-                set file [dict get $frameInfo file]
-                dict set lineInfo file "\"$file\""
+                dict set lineInfo file "\"[dict get $frameInfo file]\""
                 break
             }
             proc { # Frame is a proc frame
@@ -124,22 +144,17 @@ proc ::flytrap::GetLineInfo {max} {
                         break
                     }
                 }
-                set evalLines 0
+                # Break if no file frame is found above.
+                if {[dict exists [GetLineInfo [expr {$frame - 1}]] file]} {
+                    break
+                }
+                # Prefer proc over eval
+                set evalLines 1
             }
             eval { # Frame is a command evaluation. 
-                # Only save the lowest level eval.
-                if {$evalLines == 0} {
-                    set cmd [dict get $frameInfo cmd]
-                    dict set lineInfo cmd "\{$cmd\}"
-                    set evalLines $line
-                }
+                set evalLines [dict get $frameInfo line]
             }
         }
-    }
-    # Adjust for eval lines
-    if {$evalLines != 0} {
-        dict incr lineInfo line $evalLines
-        dict incr lineInfo line -1
     }
     return [join $lineInfo]
 }
@@ -289,14 +304,103 @@ proc ::flytrap::LeaveStep {cmdString code result args} {
     # -1 is LeaveStep, -2 is actual code
     set INFO [GetLineInfo [expr {$frame - 2}]]
     if {!$DEBUG} {
-        puts "ERROR...\n($INFO)"
-        uplevel 1 [list ::wob::mainLoop break]
+        puts "ERROR..."
+        if {$INFO ne ""} {
+            puts "($INFO)"
+        }
+        uplevel 1 {::wob::mainLoop break}
     }
     # Remove traces, which then unwinds the interpreter
     trace remove execution Eval enterstep ::flytrap::EnterStep
     trace remove execution Eval leavestep ::flytrap::LeaveStep
 
     return
+}
+
+# viewVars --
+#
+# View all variables in current scope. Returns varViewer object.
+# Does not enter event loop
+
+proc ::flytrap::viewVars {} {
+    uplevel 1 {::flytrap::varViewer new [info vars]}
+}
+
+# varViewer --
+#
+# Widget class for viewing variables. Requires package Tktable
+#
+# Syntax:
+# varViewer new $varList <$title>
+# varViewer create $name $varList <$title>
+#
+# Arguments:
+# name          Widget object name
+# varList       Variables to view
+# title         Title. Default "Workspace"
+
+::oo::class create ::flytrap::varViewer {
+    superclass ::wob::widget
+    constructor {varList {title Workspace}} {
+        next $title; # Initialize widget
+        my eval {package require Tktable}
+        
+        # Initialize cells with headers
+        my set cells(0,0) "Variable"
+        my set cells(0,1) "Value"
+        
+        # Fill with sorted variables and values
+        set i 1
+        foreach varName $varList {
+            upvar 1 $varName var
+            if {![info exists var]} {
+                return -code error "$varName does not exist"
+            }
+            if {[array exists var]} {
+                # Array case
+                foreach key [lsort [array names var]] {
+                    my set cells($i,0) ${varName}($key)
+                    my vlink var($key) cells($i,1)
+                    incr i
+                }
+            } else {
+                # Scalar case
+                my set cells($i,0) $varName
+                my vlink var cells($i,1)
+                incr i
+            }
+        }
+        
+        # Create variable viewer widget
+        my eval {
+            # Create frame, scroll bar, and button
+            frame .f -bd 2 -relief groove
+            scrollbar .f.sbar -command {.f.tbl yview}
+            
+            # Create table
+            table .f.tbl -rows [expr {[array size cells]/2}] -cols 2 
+            .f.tbl configure -yscrollcommand {.f.sbar set}
+            .f.tbl configure -titlerows 1 -titlecols 1 -height 10 -width 2
+            .f.tbl configure -anchor nw -multiline 0 -ellipsis "..."
+            .f.tbl configure -rowseparator " " -colseparator "\n"
+            .f.tbl configure -selectmode single -invertselected 1 
+            .f.tbl configure -variable cells -state disabled
+            .f.tbl configure -rowstretchmode all; # stretches all rows
+            .f.tbl configure -colstretchmode unset; # only stretches value col
+            .f.tbl tag configure active -fg black
+            .f.tbl height 0 1; # Height of title row 
+            .f.tbl width 0 25 1 50; # Width of var and val columns
+
+            # Arrange widget
+            grid .f -column 0 -row 0 -columnspan 2 -rowspan 2 -sticky nsew
+            grid .f.tbl -column 0 -row 1 -columnspan 1 -rowspan 1 -sticky nsew
+            grid .f.sbar -column 1 -row 1 -columnspan 1 -rowspan 1 -sticky ns
+            grid columnconfigure . all -weight 1
+            grid rowconfigure . all -weight 1
+            grid columnconfigure .f .f.tbl -weight 1
+            grid rowconfigure .f .f.tbl -weight 1
+        }
+    }
 }
 
 # Finally, provide the package
