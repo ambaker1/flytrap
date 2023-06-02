@@ -17,11 +17,36 @@
 \begin{document}
 \maketitle
 \begin{abstract}
-Since OpenSees is a script-based finite element analysis software, it can be difficult to debug a model or analysis when problems arise.
-Typically, \textit{puts} statements are the extent of debugging a script written in Tcl, but this method can be cumbersome for more complex scripts.
-Towards making OpenSees Tcl more user-friendly, the ``flytrap'' package makes debugging code easy.
+\begin{center}
+Say goodbye to debugging with countless \textit{puts} statements, and say hello to ``flytrap''!
+\end{center}
 \end{abstract}
-
+\clearpage
+\section{Pausing a Script} 
+The \cmdlink{pause} command pauses a Tcl script, prints the file and line number, and enters command-line mode, allowing the user to query variables and insert code into an analysis. 
+If the command entered while paused returns an error, the error message will be displayed and the script will remain paused. 
+If the command entered is ``return'', the pause will be exited and the corresponding result and options will be passed to the caller. 
+For example, a loop can be broken by entering \textit{return -code break} in pause mode. 
+Pressing enter with no commands will simply continue the script.
+\begin{syntax}
+\command{pause} <\$varName>
+\end{syntax}
+\begin{args}
+\$varName & Optional variable name to store the info displayed on screen.
+\end{args}
+\begin{example}{Pausing an analysis}
+\begin{lstlisting}
+pause
+\end{lstlisting}
+\tcblower
+\begin{lstlisting}
+PAUSED...
+(line 407 file "C:/User/Documents/MyFile.tcl")
+> 
+\end{lstlisting}
+\end{example}
+Note: If in interactive mode, there may not be a file to pause in. 
+In this case, it will list the procedure or script where the pause occurred.
 \clearpage
 \section{Advanced Tcl Debugger}
 The \cmdlink{flytrap} command parses a Tcl script, and prints out the evaluation steps and results if an error is reached.
@@ -62,95 +87,49 @@ flytrap -body {
 17
 \end{lstlisting}
 \end{example}
-\clearpage
-\section{Pausing a Script} 
-The \cmdlink{pause} command pauses a Tcl script, prints the file and line number, and enters command-line mode, allowing the user to query variables and insert code into an analysis. 
-If the command entered while paused returns an error, the error message will be displayed and the script will remain paused. 
-If the command entered is ``return'', the pause will be exited and the corresponding result and options will be passed to the caller. 
-For example, a loop can be broken by entering \textit{return -code break} in pause mode. 
-Pressing enter with no commands will simply continue the script.
-\begin{syntax}
-\command{pause}
-\end{syntax}
-\begin{example}{Pausing an analysis}
-\begin{lstlisting}
-pause
-\end{lstlisting}
-\tcblower
-\begin{lstlisting}
-PAUSED...
-(line 407 file "C:/User/Documents/MyFile.tcl")
-> 
-\end{lstlisting}
-\end{example}
-Note: If in interactive mode, there may not be a file to pause in. 
-In this case, it will list the procedure or script where the pause occurred.
-\clearpage
 
-\section{Unit Testing}
-The command \cmdlink{assert} can be used for basic unit testing of Tcl scripts. It throws an error if the statement is false.
-If the statement is true, it simply returns nothing and the script continues.
+\clearpage
+\section{Variable Viewer} 
+The command \cmdlink{varViewer} is a TclOO class that creates widget objects that display the values of variables. 
 \begin{syntax}
-\command{assert} \$value1 <\$op \$value2>
+\command{varViewer} new \$varList <\$title> \\
+varViewer create \$name \$varList <\$title> 
 \end{syntax}
 \begin{args}
-\$value1 & Value to test. \\
-\$op & Comparison operator. Default ``==''. \\
-\$value2 & Comparison value. Default 1, or ``true''.
+\$name & Object name. \\
+\$varList & List of variables to view. \\
+\$title & Optional title. Default ``Workspace''.
 \end{args}
-\begin{example}{Validation for unit testing}
+\begin{example}{Monitoring variable values}
 \begin{lstlisting}
-assert [string is double 5.0]; # Asserts that 5.0 is a number
-assert [expr {2 + 2}] == 4; # Asserts that math works
+package require tin
+tin import flytrap
+set i 0
+set j 0
+varViewer new {i j}
+for {set i 0} {$i < 1000} {incr i} {
+    for {set j 0} {$j < 1000} {incr j} {
+        update
+    }
+}
 \end{lstlisting}
 \end{example}
 
-\clearpage
-\section{Printing Variables to Screen} 
-The \cmdlink{pvar} command is a short-hand function for printing the name and value of Tcl variables, including arrays.
+The command \cmdlink{viewVars} is short-hand for creating a \cmdlink{varViewer} object for all variables in the current scope.
 \begin{syntax}
-\command{pvar} \$name1 \$name2 ...
+\command{viewVars}
 \end{syntax}
-\begin{args}
-\$name1 \$name2 ... & Name(s) of variables to print
-\end{args}
 
-\begin{example}{Printing variables to screen}
-\begin{lstlisting}
-set a 5
-set b 7
-set c(1) 5
-set c(2) 6
-pvar a b
-\end{lstlisting}
-\tcblower
-\begin{lstlisting}
-a = 5
-b = 7
-c(1) = 5
-c(2) = 6
-\end{lstlisting}
-\end{example}
-
-\clearpage
-\section{Interactive Workspace Viewer} 
-The command \cmdlink{viewVars} pauses a Tcl script and opens up an interactive table of all variables in the current scope and their values. Variables cannot be edited in the variable viewer window, but their values can be selected and copied. This command in particular requires the packages ``Tk'' and ``Tktable''.
-\begin{syntax}
-\command{viewVars} <\$var1 \$var2 ...>
-\end{syntax}
-\begin{args}
-\$var1 \$var2 ... & Variables to view. Default all in current scope (minus \href{https://www.tcl-lang.org/man/tcl/TclCmd/tclvars.htm}{tclvars}).
-\end{args}
 \begin{example}{Workspace viewer}
 \begin{lstlisting}
 set a 5
 set b 7
-set c(1) 5
-set c(2) 6
+array set c {1 5 2 6}
 viewVars
+pause
 \end{lstlisting}
 \tcblower
 
-\includegraphics{figures/workspace.png}
+\includegraphics[width = 4in]{figures/workspace.png}
 \end{example}
 \end{document}
