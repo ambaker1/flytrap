@@ -48,20 +48,18 @@ PAUSED...
 Note: If in interactive mode, there may not be a file to pause in. 
 In this case, it will list the procedure or script where the pause occurred.
 \clearpage
-
 \section{Advanced Tcl Debugger}
 The \cmdlink{flytrap} command parses a Tcl script, and prints out the evaluation steps and results if an error is reached.
 Additionally, if an error is reached, the script will pause at the line where the error occurred, allowing for interactive introspection of the problem, at the depth specified.
 \begin{syntax}
-\command{flytrap} -file \$filename <\$depth> <\$verbose> <\$varName> \\
-flytrap -body \$script <\$depth> <\$verbose> <\$varName> 
+\command{flytrap} -file \$filename <\$depth> <\$verbose> \\
+flytrap -body \$script <\$depth> <\$verbose>
 \end{syntax}
 \begin{args}
 \$filename & File path of Tcl script to debug. \\
 \$script & Tcl script to debug. \\
 \$depth & Optional recursive depth to step into procedures (default 0). \\
-\$verbose & Optional flag to always print out all steps and results (default 0). \\
-\$varName & Optional variable name to store the info displayed on screen.
+\$verbose & Optional flag to always print out all steps and results (default 0).
 \end{args}
 
 \begin{example}{Verbose evaluation of a procedure}
@@ -89,74 +87,4 @@ flytrap -body {
 17
 \end{lstlisting}
 \end{example}
-\clearpage
-
-\section{Printing Variables to Screen} 
-The \cmdlink{pvar} command is a short-hand function for printing the name and value of Tcl variables, including arrays.
-\begin{syntax}
-\command{pvar} \$name1 \$name2 ...
-\end{syntax}
-\begin{args}
-\$name1 \$name2 ... & Name(s) of variables to print
-\end{args}
-
-\begin{example}{Printing variables to screen}
-\begin{lstlisting}
-set a 5
-set b 7
-set c(1) 5
-set c(2) 6
-pvar a b
-\end{lstlisting}
-\tcblower
-\begin{lstlisting}
-a = 5
-b = 7
-c(1) = 5
-c(2) = 6
-\end{lstlisting}
-\end{example}
-
-\clearpage
-\section{Interactive Workspace Viewer} 
-The command \cmdlink{viewVars} pauses a Tcl script and opens up an interactive table of all variables in the current scope and their values. Variables cannot be edited in the variable viewer window, but their values can be selected and copied. This command in particular requires the packages ``Tk'' and ``Tktable''.
-\begin{syntax}
-\command{viewVars} <\$var1 \$var2 ...>
-\end{syntax}
-\begin{args}
-\$var1 \$var2 ... & Variables to view. Default all in current scope (minus \href{https://www.tcl-lang.org/man/tcl/TclCmd/tclvars.htm}{tclvars}).
-\end{args}
-\begin{example}{Workspace viewer}
-\begin{lstlisting}
-set a 5
-set b 7
-set c(1) 5
-set c(2) 6
-viewVars
-\end{lstlisting}
-\tcblower
-
-\includegraphics{figures/workspace.png}
-\end{example}
-\clearpage
-
-\section{Unit Testing}
-The command \cmdlink{assert} can be used for basic unit testing of Tcl scripts. It throws an error if the statement is false.
-If the statement is true, it simply returns nothing and the script continues.
-\begin{syntax}
-\command{assert} \$value1 <\$op \$value2>
-\end{syntax}
-\begin{args}
-\$value1 & Value to test. \\
-\$op & Comparison operator. Default ``==''. \\
-\$value2 & Comparison value. Default 1, or ``true''.
-\end{args}
-\begin{example}{Validation for unit testing}
-\begin{lstlisting}
-assert [string is double 5.0]; # Asserts that 5.0 is a number
-assert [expr {2 + 2}] == 4; # Asserts that math works
-\end{lstlisting}
-\end{example}
-
-\clearpage
 \end{document}

@@ -10,7 +10,7 @@
 ################################################################################
 
 # Required packages
-package require wob 0.2.1
+package require wob 0.1
 
 # Define namespace
 namespace eval ::flytrap {
@@ -28,8 +28,6 @@ namespace eval ::flytrap {
     # Exported commands
     namespace export pause; # Enter interactive mode in current level
     namespace export flytrap; # Catch bugs in a Tcl script
-    namespace export printStack; # Print out the call stack
-	namespace export viewVars; # Open an interactive variable viewer widget
 }
 
 # pause --
@@ -300,103 +298,6 @@ proc ::flytrap::LeaveStep {cmdString code result args} {
 
     return
 }
-
-# printStack --
-#
-# Print out the entire call stack.
-# This is useful for advanced introspection.
-
-proc ::flytrap::printStack {} {
-    set n [info frame]
-    puts "CALL STACK:"
-    for {set i 1} {$i < $n} {incr i} {
-        puts "$i: [info frame $i]"
-    }
-}
-
-# viewVars --
-#
-# Widget for viewing variables. Requires package Tktable
-#
-# Syntax:
-# viewVars <$varList>
-#
-# Arguments:
-# varList       Variables to view. By default, "info vars"
-
-proc ::flytrap::viewVars {args} {
-    # Create widget interpreter and ensure required packages are available
-    if {[llength $args] == 0} {
-        set varList [uplevel 1 {info vars}]
-    } elseif {[llength $args] == 1} {
-        set varList [lindex $args 0]
-    } else {
-        ::errmsg::wrongNumArgs "viewVars ?varList?"
-    }
-    
-    # Create widget and require Tktable.
-    set widget [::wob::widget new "Workspace"]
-    $widget eval {package require Tktable}
-    
-    # Initialize cells with headers
-    $widget set cells(0,0) "Variable"
-    $widget set cells(0,1) "Value"
-    
-    # Fill with sorted variables and values
-    set i 1
-    foreach varName $varList {
-        upvar 1 $varName var
-        if {![info exists var]} {
-            $widget destroy
-            return -code error "$varName does not exist"
-        }
-        if {[array exists var]} {
-            # Array case
-            foreach key [lsort [array names var]] {
-                $widget set cells($i,0) ${varName}($key)
-                $widget vlink var($key) cells($i,1)
-                incr i
-            }
-        } else {
-            # Scalar case
-            $widget set cells($i,0) $varName
-            $widget vlink var cells($i,1)
-            incr i
-        }
-    }
-    
-    # Create workspace widget
-    $widget eval {
-        # Create frame, scroll bar, and button
-        frame .f -bd 2 -relief groove
-        scrollbar .f.sbar -command {.f.tbl yview}
-        
-        # Create table
-        set n [expr {[array size cells]/2}]
-        table .f.tbl -rows $n -cols 2 -yscrollcommand {.f.sbar set}
-        .f.tbl configure -titlerows 1 -titlecols 1 -height 10 -width 2
-        .f.tbl configure -anchor nw  -multiline 0 -ellipsis "..."
-        .f.tbl configure -rowseparator " " -colseparator "\n"
-        .f.tbl configure -selectmode single -invertselected 1 
-        .f.tbl configure -variable cells -state disabled
-        .f.tbl configure -rowstretchmode all; # stretches all rows
-        .f.tbl configure -colstretchmode unset; # only stretches value col
-        .f.tbl tag configure active -fg black
-        .f.tbl height 0 1; # Height of title row 
-        .f.tbl width 0 25 1 50; # Width of var and val columns
-
-        # Arrange widget
-        grid .f -column 0 -row 0 -columnspan 2 -rowspan 2 -sticky nsew
-        grid .f.tbl -column 0 -row 1 -columnspan 1 -rowspan 1 -sticky nsew
-        grid .f.sbar -column 1 -row 1 -columnspan 1 -rowspan 1 -sticky ns
-        grid columnconfigure . all -weight 1
-        grid rowconfigure . all -weight 1
-        grid columnconfigure .f .f.tbl -weight 1
-        grid rowconfigure .f .f.tbl -weight 1
-    }
-    return $widget
-}
-
 
 # Finally, provide the package
 package provide flytrap @VERSION@
