@@ -299,5 +299,91 @@ proc ::flytrap::LeaveStep {cmdString code result args} {
     return
 }
 
+# viewVars --
+#
+# View all variables in current scope. Returns varViewer object.
+# Does not enter event loop
+
+proc ::flytrap::viewVars {} {
+    uplevel 1 {::flytrap::varViewer new [info vars]}
+}
+
+# varViewer --
+#
+# Widget class for viewing variables. Requires package Tktable
+#
+# Syntax:
+# varViewer new $varList <$title>
+# varViewer create $name $varList <$title>
+#
+# Arguments:
+# name          Widget object name
+# varList       Variables to view
+# title         Title. Default "Workspace"
+
+::oo::class create ::flytrap::varViewer {
+    superclass ::wob::widget
+    constructor {varList {title Workspace}} {
+        next $title; # Initialize widget
+        my eval {package require Tktable}
+        
+        # Initialize cells with headers
+        my set cells(0,0) "Variable"
+        my set cells(0,1) "Value"
+        
+        # Fill with sorted variables and values
+        set i 1
+        foreach varName $varList {
+            upvar 1 $varName var
+            if {![info exists var]} {
+                return -code error "$varName does not exist"
+            }
+            if {[array exists var]} {
+                # Array case
+                foreach key [lsort [array names var]] {
+                    my set cells($i,0) ${varName}($key)
+                    my vlink var($key) cells($i,1)
+                    incr i
+                }
+            } else {
+                # Scalar case
+                my set cells($i,0) $varName
+                my vlink var cells($i,1)
+                incr i
+            }
+        }
+        
+        # Create variable viewer widget
+        my eval {
+            # Create frame, scroll bar, and button
+            frame .f -bd 2 -relief groove
+            scrollbar .f.sbar -command {.f.tbl yview}
+            
+            # Create table
+            table .f.tbl -rows [expr {[array size cells]/2}] -cols 2 
+            .f.tbl configure -yscrollcommand {.f.sbar set}
+            .f.tbl configure -titlerows 1 -titlecols 1 -height 10 -width 2
+            .f.tbl configure -anchor nw -multiline 0 -ellipsis "..."
+            .f.tbl configure -rowseparator " " -colseparator "\n"
+            .f.tbl configure -selectmode single -invertselected 1 
+            .f.tbl configure -variable cells -state disabled
+            .f.tbl configure -rowstretchmode all; # stretches all rows
+            .f.tbl configure -colstretchmode unset; # only stretches value col
+            .f.tbl tag configure active -fg black
+            .f.tbl height 0 1; # Height of title row 
+            .f.tbl width 0 25 1 50; # Width of var and val columns
+
+            # Arrange widget
+            grid .f -column 0 -row 0 -columnspan 2 -rowspan 2 -sticky nsew
+            grid .f.tbl -column 0 -row 1 -columnspan 1 -rowspan 1 -sticky nsew
+            grid .f.sbar -column 1 -row 1 -columnspan 1 -rowspan 1 -sticky ns
+            grid columnconfigure . all -weight 1
+            grid rowconfigure . all -weight 1
+            grid columnconfigure .f .f.tbl -weight 1
+            grid rowconfigure .f .f.tbl -weight 1
+        }
+    }
+}
+
 # Finally, provide the package
 package provide flytrap @VERSION@
