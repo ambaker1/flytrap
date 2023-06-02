@@ -9,26 +9,26 @@
 # redistribution, and for a DISCLAIMER OF ALL WARRANTIES.
 ################################################################################
 
+# Required package
 package require wob 0.2.1
 
 # Define namespace
 namespace eval ::flytrap {
     # Internal variables
-    variable DEBUG 0; # For testing flytrap and pause (no interactive mode)
-    variable INFO ""; # Pause line info dictionary (defined in InterpretFrame)
-    variable debugType; # -file or -body. For "flytrap" and "debug"
-    variable debugBody; # Command passed to internal Eval command
-    variable maxDepth; # Maximum debug depth
+    variable DEBUG 0; # Toggle for testing flytrap
+    variable INFO ""; # Line info dictionary for testing flytrap
+    variable baseLevel; # Reference level (for flytrap)
+    variable maxDepth; # Maximum debug depth (for flytrap)
+    variable minFrame; # Minimum frame number (for flytrap)
     variable verboseFlag; # Whether debug is verbose, or only prints on error.
-    variable baseLevel; # Level at which the debug command was called
-    variable stepHistory; # History of enter and leave traces in Eval
     variable errorStack; # Commands evaluated before error
-    variable excludeList {catch try}; # Commands to ignore when in debug
-    variable myLocation [file normalize [info script]]; # library file path
+    variable stepHistory; # History of enter and leave traces in Eval
+    variable excludeList {catch try}; # Commands to ignore (for flytrap)
        
     # Exported commands
     namespace export pause; # Enter interactive mode in current level
     namespace export flytrap; # Catch bugs in a Tcl script
+    namespace export printStack; # Print out the call stack
 	namespace export viewVars; # Open an interactive variable viewer widget
 }
 
@@ -47,8 +47,8 @@ proc ::flytrap::pause {} {
     variable DEBUG
     variable INFO ""
     # Get frame info of caller
-    set i [info frame]
-    set INFO [GetFrameInfo [incr i -1]]
+    set frame [info frame]
+    set INFO [GetLineInfo [incr frame -1]]
     # If DEBUG, just return the line info (for testing)
     if {$DEBUG} {
         return $INFO
@@ -58,75 +58,90 @@ proc ::flytrap::pause {} {
     uplevel 1 [list ::wob::mainLoop break]
 }
 
-# GetFrameInfo --
+# GetLineInfo --
 #
 # Private procedure used by both pause and flytrap to get frame info to display.
 #
 # Syntax:
-# GetFrameInfo $frame $addLines
+# GetLineInfo $max
 #
 # Arguments:
-# frame         Frame dictionary to interpret
-# addLines      Lines to add.
+# max       Maximum frame (absolute reference)
 
-proc ::flytrap::GetFrameInfo {min} {
-    variable DEBUG
-    set i $min; # Minimum frame number
-    set addLines 0
-    set lineInfo [dict create]
-    for {set i $min} {$i > 0} {incr i -1} {
-        set frame [info frame $i]
-        puts "$i: $frame"
-        set type [dict get $frame type]
-        if {$type eq "precompiled"} {
+proc ::flytrap::GetLineInfo {max} {
+    set evalLines 0
+    for {set i $max} {$i > 0} {incr i -1} {
+        # Get frame dictionary
+        set frameInfo [info frame $i]
+        
+        # Skip flytrap-specific commands
+        if {[dict exists $frameInfo proc]} {
+            # Main body of "Eval"
+            if {[dict get $frameInfo proc] eq "::flytrap::Eval"} {
+                if {[dict get $frameInfo cmd] eq {uplevel 2 $body}} {
+                    continue
+                }
+            }
+            # Call of "Eval" in "flytrap"
+            if {[dict get $frameInfo proc] eq "::flytrap::flytrap"} {
+                if {[dict get $frameInfo cmd] in {
+                    {Eval $body} {catch {Eval $body} result options}
+                }} then {
+                    continue
+                }
+            }
+        }
+        
+        # Skip precompiled code
+        if {[dict get $frameInfo type] eq "precompiled"} {
             continue
         }
-        set line [dict get $frame line]
-        incr line $addLines
+        
+        # Get line and initialize lineInfo dictionary
+        set line [dict get $frameInfo line]
         set lineInfo [dict create line $line]
-        switch [dict get $frame type] {
+        
+        # Switch for frame type
+        switch [dict get $frameInfo type] {
             source { # Frame is a source frame
-                set file [dict get $frame file]
+                set file [dict get $frameInfo file]
                 dict set lineInfo file "\"$file\""
                 break
             }
             proc { # Frame is a proc frame
-                if {[dict exists $frame proc]} {
+                if {[dict exists $frameInfo proc]} {
                     # Normal proc call
-                    dict set lineInfo proc [dict get $frame proc]
-                } elseif {[dict exists $frame method]} {
+                    dict set lineInfo proc [dict get $frameInfo proc]
+                } elseif {[dict exists $frameInfo method]} {
                     # TclOO method call
-                    dict set lineInfo method [dict get $frame method]
-                    dict set lineInfo class [dict get $frame class]
+                    dict set lineInfo method [dict get $frameInfo method]
+                    dict set lineInfo class [dict get $frameInfo class]
                     # In Tcl 8.6.10, there is no call frame for the file in 
                     # which the constructor is defined. And for the destructor,
                     # the calling file line number is -1. So simply return the
                     # line number in the constructor/destructor.
-                    if {[dict get $frame method] in {
+                    if {[dict get $frameInfo method] in {
                         <constructor> <destructor>
                     }} then {
                         break
                     }
                 }
-                set addLines 0
+                set evalLines 0
             }
             eval { # Frame is a command evaluation. 
+                # Only save the lowest level eval.
                 if {$evalLines == 0} {
-                    set cmd [dict get $frame cmd]
+                    set cmd [dict get $frameInfo cmd]
                     dict set lineInfo cmd "\{$cmd\}"
+                    set evalLines $line
                 }
-                
-                # This needs to work for both interp debug {} -frame 0 and 1
-                
-                if {[interp debug {}] eq "-frame 0"} {
-                    if {[lindex $cmd 0] in {eval uplevel}} {
-                        # continue
-                    }
-                }
-                incr addLines $line
-                incr addLines -1
             }
         }
+    }
+    # Adjust for eval lines
+    if {$evalLines != 0} {
+        dict incr lineInfo line $evalLines
+        dict incr lineInfo line -1
     }
     return [join $lineInfo]
 }
@@ -139,31 +154,30 @@ proc ::flytrap::GetFrameInfo {min} {
 # When in DEBUG mode, it does not pause, just catches the error and returns INFO
 # 
 # Syntax:
-# flytrap -file $filename <$depth> <$verbose> <$varName>
-# flytrap -body $script <$depth> <$verbose> <$varName>
+# flytrap -file $filename <$depth> <$verbose>
+# flytrap -body $script <$depth> <$verbose>
 #
 # Arguments:
 # filename      File path of file to source (only with -file)
-# script        Tcl script to eval (only with -body)
+# script        Script to evaluate (only with -body)
 # depth         Debug depth. Default 0. Steps into procedures if > 0
 # verbose       To print out commands and intermediate steps. Default 0
 
 proc ::flytrap::flytrap {type input {depth 0} {verbose 0}} {
     variable DEBUG
     variable INFO ""
-    variable debugType $type
-    variable debugBody ""
-    variable maxDepth $depth
-    variable verboseFlag $verbose
     variable baseLevel [info level]
-    variable stepHistory ""
+    variable maxDepth $depth
+    variable minFrame [expr {[info frame] + 3}]
+    variable verboseFlag $verbose
     variable errorStack ""
-    
+    variable stepHistory ""
+
     # Determine debugBody from debugType
-    switch $debugType {
-        -file {set debugBody [list source $input]}
-        -body {set debugBody $input}
-        default {return -code error "unknown option $debugType"}
+    switch $type {
+        -file {set body [list source $input]}
+        -body {set body $input}
+        default {return -code error "unknown option $type"}
     }
 
     # Check input
@@ -174,7 +188,7 @@ proc ::flytrap::flytrap {type input {depth 0} {verbose 0}} {
     # Evaluate command with recursive execution trace
     trace add execution Eval enterstep ::flytrap::EnterStep
     trace add execution Eval leavestep ::flytrap::LeaveStep
-    catch {Eval $debugBody} result options
+    catch {Eval $body} result options
     trace remove execution Eval enterstep ::flytrap::EnterStep
     trace remove execution Eval leavestep ::flytrap::LeaveStep
     # Handle debug case
@@ -199,27 +213,27 @@ proc ::flytrap::Eval {body} {uplevel 2 $body}
 # Private procedure to print out intermediate steps
 
 proc ::flytrap::EnterStep {cmdString args} {
-    variable debugType
-    variable debugBody
-    variable maxDepth
-    variable verboseFlag
     variable baseLevel
-    variable stepHistory
+    variable maxDepth
+    variable minFrame
+    variable verboseFlag
     variable errorStack
+    variable stepHistory
+    
+    # Skip if level/frame is outside range
+    # Level is for variable and command scope.
+    # Frame is for call stack execution
     set depth [expr {[info level] - $baseLevel}]
-    if {$depth <= $maxDepth} {
-        if {$cmdString ne [list uplevel 2 $debugBody]} {
-            lappend errorStack $cmdString; # push
-            if {[llength $errorStack] == 1 && $debugType eq "-file"} {
-                return
-            }
-            if {$verboseFlag} {
-                set prefix [string repeat "  " $depth]
-                puts "$prefix> $cmdString"
-            }
-            lappend stepHistory enter $depth $cmdString
-        }; # end if command not main uplevel
-    }; # end if valid depth
+    set frame [info frame]
+    if {$depth > $maxDepth || $frame < $minFrame} {
+        return
+    }
+    lappend errorStack $cmdString; # push
+    if {$verboseFlag} {
+        set prefix [string repeat "  " $depth]
+        puts "$prefix> $cmdString"
+    }
+    lappend stepHistory enter $depth $cmdString
     return
 }
 
@@ -230,29 +244,28 @@ proc ::flytrap::EnterStep {cmdString args} {
 proc ::flytrap::LeaveStep {cmdString code result args} {
     variable DEBUG
     variable INFO
-    variable debugType
-    variable debugBody
-    variable maxDepth
-    variable verboseFlag
     variable baseLevel
-    variable stepHistory
+    variable maxDepth
+    variable minFrame
+    variable verboseFlag
     variable errorStack
+    variable stepHistory
     variable excludeList
-    variable myLocation
-    
+    # Skip if level/frame is outside range
+    # Level is for variable and command scope.
+    # Frame is for call stack execution
     set depth [expr {[info level] - $baseLevel}]
-    if {$depth > $maxDepth} {
+    set frame [info frame]
+    if {$depth > $maxDepth || $frame < $minFrame} {
         return
     }
     # Handle command and error stacks
-    if {$cmdString ne [list uplevel 2 $debugBody]} {
-        set errorStack [lreplace $errorStack end end]; # pop
-        if {$verboseFlag} {
-            set prefix [string repeat "  " $depth]
-            if {$result ne ""} {puts "$prefix$result"}
-        }
-        lappend stepHistory leave $depth $result
-    }; # end if command not main uplevel
+    set errorStack [lreplace $errorStack end end]; # pop
+    if {$verboseFlag} {
+        set prefix [string repeat "  " $depth]
+        if {$result ne ""} {puts "$prefix$result"}
+    }
+    lappend stepHistory leave $depth $result
     # If not an error, return
     if {$code != 1} {
         return
@@ -274,10 +287,9 @@ proc ::flytrap::LeaveStep {cmdString code result args} {
         }
     }
 
-    # Get location of error from frame stack
-    set i [info frame]
-    set INFO [GetFrameInfo [incr i -2]]; # -1 is LeaveStep. -2 is the user code
     # Print error line information and enter interactive mode
+    # -1 is LeaveStep, -2 is actual code
+    set INFO [GetLineInfo [expr {$frame - 2}]]
     if {!$DEBUG} {
         puts "ERROR...\n($INFO)"
         uplevel 1 [list ::wob::mainLoop break]
@@ -287,6 +299,19 @@ proc ::flytrap::LeaveStep {cmdString code result args} {
     trace remove execution Eval leavestep ::flytrap::LeaveStep
 
     return
+}
+
+# printStack --
+#
+# Print out the entire call stack.
+# This is useful for advanced introspection.
+
+proc ::flytrap::printStack {} {
+    set n [info frame]
+    puts "CALL STACK:"
+    for {set i 1} {$i < $n} {incr i} {
+        puts "$i: [info frame $i]"
+    }
 }
 
 # viewVars --
