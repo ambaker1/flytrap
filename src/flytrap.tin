@@ -9,7 +9,7 @@
 # redistribution, and for a DISCLAIMER OF ALL WARRANTIES.
 ################################################################################
 
-# Required package
+# Required packages
 package require wob 0.2.1
 
 # Define namespace
