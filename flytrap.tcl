@@ -10,7 +10,7 @@
 ################################################################################
 
 # Required packages
-package require wob 0.2.4
+package require wob 0.3
 
 # Define namespace
 namespace eval ::flytrap {
@@ -28,6 +28,7 @@ namespace eval ::flytrap {
     # Exported commands
     namespace export pause; # Enter interactive mode in current level.
     namespace export flytrap; # Catch bugs in a Tcl script.
+    namespace export printVars; # Print variables to screen.
     namespace export viewVars; # View all variables in current level.
     namespace export varViewer; # Widget class for viewing variables.
 }
@@ -167,35 +168,72 @@ proc ::flytrap::GetLineInfo {maxFrame} {
 # When in DEBUG mode, it does not pause, just catches the error and returns INFO
 # 
 # Syntax:
-# flytrap -file $filename <$depth> <$verbose>
-# flytrap -body $script <$depth> <$verbose>
+# flytrap <-depth $depth> <-verbose $verbose> (-file $filename |<-body> $body)
 #
 # Arguments:
-# filename      File path of file to source (only with -file)
-# script        Script to evaluate (only with -body)
 # depth         Debug depth. Default 0. Steps into procedures if > 0
 # verbose       To print out commands and intermediate steps. Default 0
+# body          Body to evaluate.
+# filename      File to source.
 
-proc ::flytrap::flytrap {type input {depth 0} {verbose 0}} {
+proc ::flytrap::flytrap {args} {
     variable DEBUG
     variable INFO ""
     variable baseLevel [info level]
-    variable maxDepth $depth
+    variable maxDepth 0; # Default
     variable minFrame [expr {[info frame] + 3}]
-    variable verboseFlag $verbose
+    variable verboseFlag 0; # Default
     variable errorStack ""
     variable stepHistory ""
-
-    # Determine debugBody from debugType
-    switch $type {
-        -file {set body [list source $input]}
-        -body {set body $input}
-        default {return -code error "unknown option $type"}
+    
+    # Check arity
+    if {[llength $args]%2} {
+        set args [linsert $args end-1 -body]; # Default -body option
     }
-
-    # Check input
-    if {![string is integer $depth] || $depth < 0} {
-        return -code error "Depth must be integer >= 0"
+    if {[llength $args] == 0} {
+        return -code error "wrong # args: should be\
+                \"flytrap ?option value ...? (-file filename | ?-body? body)\""
+    }
+    
+    # Interpret input
+    set input [lindex $args end]
+    set type  [lindex $args end-1]
+    switch $type {
+        -body {
+            set body $input
+        }
+        -file { # Validate file input
+            set filename $input
+            if {![file isfile $filename]} {
+                return -code error "\"$filename\" is not a file"
+            }
+            set body [list source $filename]
+        }
+        default {
+            return -code error "unknown option \"\$type\". want -body or -file"
+        }
+    }
+    
+    # Interpret options
+    foreach {option value} [lrange $args 0 end-2] {
+        switch $option {
+            -depth { # Maximum depth to step into procedures
+                if {![string is integer -strict $value] || $value < 0} {
+                    return -code error "-depth must be integer >= 0"
+                }
+                set maxDepth $value
+            }
+            -verbose { # Whether to print out steps even if no error
+                if {![string is boolean -strict $value]} {
+                    return -code error "-verbose must be boolean"
+                }
+                set verboseFlag $value
+            }
+            default {
+                return -code error "unknown option \"\$option\":\
+                        want -depth or -verbose"
+            }
+        }
     }
 
     # Evaluate command with recursive execution trace
@@ -317,18 +355,59 @@ proc ::flytrap::LeaveStep {cmdString code result args} {
     return
 }
 
+# printVars --
+#
+# Same idea as parray. Prints the values of variables to screen.
+#
+# Syntax:
+# printVars $varName ...
+#
+# Arguments:
+# $varName ...      Names of variable to print
+
+proc ::flytrap::printVars {args} {
+    puts [uplevel 1 [list ::flytrap::PrintVars {*}$args]]
+}
+
+# PrintVars --
+#
+# Private procedure for testing (returns what is printed with "printVars")
+
+proc ::flytrap::PrintVars {args} {
+    foreach varName $args {
+        upvar 1 $varName var
+        if {![info exists var]} {
+            return -code error "can't read \"$varName\": no such variable"
+        } elseif {[array exists var]} {
+            foreach {key value} [array get var] {
+                lappend varList [list "$varName\($key\)" = $value]
+            }
+        } else {
+            lappend varList [list $varName = $var]
+        }
+    }
+    join $varList \n
+}
+
 # viewVars --
 #
-# View all variables in current scope. Returns varViewer object.
-# Does not enter event loop
+# View all variables in the current scope and pause.
+#
+# Syntax:
+# viewVars
 
 proc ::flytrap::viewVars {} {
-    uplevel 1 {::flytrap::varViewer new [info vars]}
+    set varList [uplevel 1 {info vars}]
+    set widget [uplevel 1 [list ::flytrap::varViewer new $varList]]
+    uplevel 1 [::flytrap::pause]
+    $widget destroy
+    return
 }
 
 # varViewer --
 #
-# Widget class for viewing variables. Requires package Tktable
+# Widget class for viewing variables. Requires package Tktable.
+# Can be used as a framework for monitoring variables.
 #
 # Syntax:
 # varViewer new $varList <$title>
@@ -360,13 +439,13 @@ proc ::flytrap::viewVars {} {
                 # Array case
                 foreach key [lsort [array names var]] {
                     my set cells($i,0) ${varName}($key)
-                    my vlink var($key) cells($i,1)
+                    my upvar var($key) cells($i,1)
                     incr i
                 }
             } else {
                 # Scalar case
                 my set cells($i,0) $varName
-                my vlink var cells($i,1)
+                my upvar var cells($i,1)
                 incr i
             }
         }
@@ -404,4 +483,4 @@ proc ::flytrap::viewVars {} {
 }
 
 # Finally, provide the package
-package provide flytrap 0.2
+package provide flytrap 0.3
