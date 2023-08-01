@@ -29,11 +29,8 @@ If the command entered is ``return'', the pause will be exited and the correspon
 For example, a loop can be broken by entering \textit{return -code break} in pause mode. 
 Pressing enter with no commands will simply continue the script.
 \begin{syntax}
-\command{pause} <\$varName>
+\command{pause}
 \end{syntax}
-\begin{args}
-\$varName & Optional variable name to store the info displayed on screen.
-\end{args}
 \begin{example}{Pausing an analysis}
 \begin{lstlisting}
 pause
@@ -52,28 +49,25 @@ In this case, it will list the procedure or script where the pause occurred.
 The \cmdlink{flytrap} command parses a Tcl script, and prints out the evaluation steps and results if an error is reached.
 Additionally, if an error is reached, the script will pause at the line where the error occurred, allowing for interactive introspection of the problem, at the depth specified.
 \begin{syntax}
-\command{flytrap} -file \$filename <\$depth> <\$verbose> \\
-flytrap -body \$script <\$depth> <\$verbose>
+\command{flytrap} <-depth \$maxDepth> <-verbose \$verboseFlag> (-file \$filename | <-body> \$body) 
 \end{syntax}
 \begin{args}
-\$filename & File path of Tcl script to debug. \\
-\$script & Tcl script to debug. \\
-\$depth & Optional recursive depth to step into procedures (default 0). \\
-\$verbose & Optional flag to always print out all steps and results (default 0).
+\$maxDepth & Optional recursive depth to step into procedures (default 0). \\
+\$verboseFlag & Optional flag to always print out all steps and results (default 0). \\
+\$filename & File path of Tcl script to debug. Mutually exclusive with -body. \\
+\$body & Tcl script to debug. Mutually exclusive with -file.
 \end{args}
 
 \begin{example}{Verbose evaluation of a procedure}
 \begin{lstlisting}
-set DEPTH 1
-set VERBOSE true
 proc add {a b} {
     return [expr {$a + $b}]
 }
 set a 5
 set b 7
-flytrap -body {
+flytrap -depth 1 -verbose true -body {
     add [expr {$a*2}] $b
-} $DEPTH $VERBOSE
+}
 \end{lstlisting}
 \tcblower
 \begin{lstlisting}
@@ -87,10 +81,36 @@ flytrap -body {
 17
 \end{lstlisting}
 \end{example}
-
 \clearpage
-\section{Variable Viewer} 
-The command \cmdlink{varViewer} is a TclOO class that creates widget objects that display the values of variables. 
+\section{Printing Variables to Screen} 
+The \cmdlink{printVars} command is a short-hand function for printing the name and values of Tcl variables, in the same style as the Tcl \textit{parray} command.
+\begin{syntax}
+\command{printVars} \$name1 \$name2 …
+\end{syntax}
+\begin{args}
+\$name1 \$name2 … & Name(s) of variables to print
+\end{args}
+
+\begin{example}{Printing variables to screen}
+\begin{lstlisting}
+set a 5
+set b 7
+set c(1) 5
+set c(2) 6
+printVars a b c
+\end{lstlisting}
+\tcblower
+\begin{lstlisting}
+a = 5
+b = 7
+c(1) = 5
+c(2) = 6
+\end{lstlisting}
+\end{example}
+\clearpage
+\section{Variable Viewer Widget Class}
+The class \cmdlink{varViewer} is a TclOO class that creates widget objects that display the values of variables. 
+It can be used to monitor variable values in a widget.
 \begin{syntax}
 \command{varViewer} new \$varList <\$title> \\
 varViewer create \$name \$varList <\$title> 
@@ -102,31 +122,24 @@ varViewer create \$name \$varList <\$title>
 \end{args}
 \begin{example}{Monitoring variable values}
 \begin{lstlisting}
-package require tin
-tin import flytrap
 set i 0
-set j 0
-varViewer new {i j}
+varViewer new i {counter}
 for {set i 0} {$i < 1000} {incr i} {
-    for {set j 0} {$j < 1000} {incr j} {
-        update
-    }
+    update
 }
 \end{lstlisting}
 \end{example}
 
-The command \cmdlink{viewVars} is short-hand for creating a \cmdlink{varViewer} object for all variables in the current scope.
+The command \cmdlink{viewVars} opens up a \cmdlink{varViewer} widget displaying the values of all the variables in the current scope, and then pauses the script using the \cmdlink{pause} command, such that continuing destroys the widget. 
 \begin{syntax}
-\command{viewVars}
+\command{viewVars} 
 \end{syntax}
-
 \begin{example}{Workspace viewer}
 \begin{lstlisting}
 set a 5
 set b 7
 array set c {1 5 2 6}
 viewVars
-pause
 \end{lstlisting}
 \tcblower
 
