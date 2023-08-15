@@ -10,7 +10,7 @@
 ################################################################################
 
 # Required packages
-package require wob 0.3
+package require wob 1.0
 
 # Define namespace
 namespace eval ::flytrap {
@@ -483,4 +483,4 @@ proc ::flytrap::viewVars {} {
 }
 
 # Finally, provide the package
-package provide flytrap 0.3
+package provide flytrap 1.0
