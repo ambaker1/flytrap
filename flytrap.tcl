@@ -483,4 +483,4 @@ proc ::flytrap::viewVars {} {
 }
 
 # Finally, provide the package
-package provide flytrap 1.0
+package provide flytrap 1.0.1

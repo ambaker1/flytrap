@@ -1,6 +1,6 @@
 # Spoof an interactive command-line session with "value" input option of exec
 exec tclsh << {
-package require tin 0.6
+package require tin 1.0
 set dir build
 source build/pkgIndex.tcl
 tin import flytrap
