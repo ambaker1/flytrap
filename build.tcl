@@ -1,6 +1,6 @@
 # Define version numbers
-set version 1.0.1
-set tin_version 1.0
+set version 1.1
+set tin_version 2.0
 set wob_version 1.0
 
 # Source required packages for testing
