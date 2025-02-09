@@ -1,4 +1,5 @@
 package require tin @TIN_REQ@
+tin add wob @WOB_REQ@ https://github.com/ambaker1/wob v@WOB_REQ@ install.tcl
 tin depend wob @WOB_REQ@
 set dir [tin mkdir -force flytrap @VERSION@]
 file copy pkgIndex.tcl flytrap.tcl README.md LICENSE $dir

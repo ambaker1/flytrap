@@ -10,7 +10,7 @@
 ################################################################################
 
 # Required packages
-package require wob 1.0
+package require wob 1.1
 
 # Define namespace
 namespace eval ::flytrap {
