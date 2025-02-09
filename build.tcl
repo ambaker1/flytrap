@@ -1,7 +1,7 @@
 # Define version numbers
 set version 1.1
 set tin_version 2.0
-set wob_version 1.0
+set wob_version 1.1
 
 # Source required packages for testing
 package require tin $tin_version
