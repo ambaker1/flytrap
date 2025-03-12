@@ -239,6 +239,8 @@ method alias {srcCmd targetCmd args} {
 #
 # Link a variable in the parent interpreter to one in the child interpreter
 # Initializes srcVar (and myVar) as blank if it does not exist.
+# NOTE: THERE IS A BUG WITH THIS - IF THE OBJECT IS DESTROYED THE TRACES STILL
+# EXIST. MAY HAVE TO RESTRICT THE LINKS TO GLOBAL? OR SOMETHING.
 #
 # Syntax:
 # $widget upvar $srcVar $myVar <$srcVar $myVar ...>
