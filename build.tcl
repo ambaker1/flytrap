@@ -79,4 +79,10 @@ tin forget flytrap
 tin clear
 tin import flytrap -exact $version
 
+# Build documentation
+puts "Building documentation..."
+cd doc
+exec -ignorestderr pdflatex flytrap.tex
+cd ..
+
 exit

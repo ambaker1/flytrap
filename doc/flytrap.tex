@@ -29,8 +29,11 @@ If the command entered is ``return'', the pause will be exited and the correspon
 For example, a loop can be broken by entering \textit{return -code break} in pause mode. 
 Pressing enter with no commands will simply continue the script.
 \begin{syntax}
-\command{pause}
+\command{pause} <\$frameOffset>
 \end{syntax}
+\begin{args}
+\$frameOffset & Frame offset for calling pause in another level (e.g. uplevel) Default 0. 
+\end{args}
 \begin{example}{Pausing an analysis}
 \begin{lstlisting}
 pause
@@ -110,7 +113,7 @@ c(2) = 6
 \clearpage
 \section{Variable Viewer Widget Class}
 The class \cmdlink{varViewer} is a TclOO class that creates widget objects that display the values of variables. 
-It can be used to monitor variable values in a widget.
+It can be used to monitor variable values in a widget. 
 \begin{syntax}
 \command{varViewer} new \$varList <\$title> \\
 varViewer create \$name \$varList <\$title> 
