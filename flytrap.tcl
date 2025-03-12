@@ -399,8 +399,10 @@ proc ::flytrap::PrintVars {args} {
 proc ::flytrap::viewVars {} {
     set varList [uplevel 1 {info vars}]
     set widget [uplevel 1 [list ::flytrap::varViewer new $varList]]
-    uplevel 1 [::flytrap::pause]
-    $widget destroy
+    uplevel 1 {::wob::mainLoop break}
+    if {[info object isa object $widget]} {
+        $widget destroy
+    }
     return
 }
 
@@ -483,4 +485,4 @@ proc ::flytrap::viewVars {} {
 }
 
 # Finally, provide the package
-package provide flytrap 1.1
+package provide flytrap 1.1.1
