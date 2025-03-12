@@ -1,5 +1,5 @@
 # Define version numbers
-set version 1.1
+set version 1.1.1
 set tin_version 2.0
 set wob_version 1.1
 
@@ -78,5 +78,11 @@ source install.tcl
 tin forget flytrap
 tin clear
 tin import flytrap -exact $version
+
+# Build documentation
+puts "Building documentation..."
+cd doc
+exec -ignorestderr pdflatex flytrap.tex
+cd ..
 
 exit

@@ -42,13 +42,17 @@ namespace eval ::flytrap {
 # When in DEBUG mode, does not pause, just returns INFO
 #
 # Syntax:
-# pause
+# pause <$frameOffset>
+#
+# Arguments:
+# frameOffset:      If calling pause with "uplevel", set this to (1 + level)
 
-proc ::flytrap::pause {} {
+proc ::flytrap::pause {{frameOffset 0}} {
     variable DEBUG
     variable INFO ""
     # Get frame info of caller
     set frame [info frame]
+    incr frame -$frameOffset; # for calling pause with uplevel
     set INFO [GetLineInfo [incr frame -1]]
     # If DEBUG, just return the line info (for testing)
     if {$DEBUG} {
@@ -399,9 +403,11 @@ proc ::flytrap::PrintVars {args} {
 proc ::flytrap::viewVars {} {
     set varList [uplevel 1 {info vars}]
     set widget [uplevel 1 [list ::flytrap::varViewer new $varList]]
-    uplevel 1 [::flytrap::pause]
-    $widget destroy
-    return
+    set result [uplevel 1 {::flytrap::pause 2}]
+    if {[info object isa object $widget]} {
+        $widget destroy
+    }
+    return $result
 }
 
 # varViewer --

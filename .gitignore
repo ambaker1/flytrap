@@ -7,3 +7,4 @@ doc/**
 !doc/figures/*.png
 !doc/template/
 !doc/template/*.tex
+!doc/template/*.tin
