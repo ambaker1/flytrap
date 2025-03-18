@@ -1,5 +1,5 @@
 # Define version numbers
-set version 1.1.1
+set version 1.2
 set tin_version 2.0
 set wob_version 1.1
 
@@ -52,6 +52,10 @@ unset a b c d
 source tests/viewVars_test.tcl
 source tests/interactive_test.tcl
 
+# Other tests
+source tests/lock_test.tcl
+source tests/logFile_test.tcl
+
 # Check number of failed tests
 set nFailed $::tcltest::numTests(Failed)
 
@@ -79,10 +83,6 @@ tin forget flytrap
 tin clear
 tin import flytrap -exact $version
 
-# Build documentation
-puts "Building documentation..."
-cd doc
-exec -ignorestderr pdflatex flytrap.tex
-cd ..
+puts "Testing and Installation Complete"
 
 exit
