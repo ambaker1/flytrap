@@ -14,6 +14,7 @@
 \title{\Huge Flytrap: Tcl Debugging Tools\\\small Version \version}
 \author{Alex Baker\\\small\url{https://github.com/ambaker1/flytrap}}
 \date{\small\today}
+\makeindex[columns=2,title={Command Index}]
 \begin{document}
 \maketitle
 \begin{abstract}
@@ -148,4 +149,76 @@ viewVars
 
 \includegraphics[width = 4in]{figures/workspace.png}
 \end{example}
+
+\section{Read-Only Variables}
+The command \cmdlink{lock} uses Tcl variable traces to make a read-only variable. 
+If attempting to modify a locked variable, it will throw a warning, but not an error.
+This can be used to override values in a script from a top-level, allowing the user to run a parameter study without modifying the source scripts.
+
+\begin{syntax}
+\command{lock} \$varName <\$value>
+\end{syntax}
+\begin{args}
+\$varName & Variable name to lock.  \\
+\$value & Value to lock variable at. Default self-locks (uses current value).
+\end{args}
+
+The command \cmdlink{unlock} unlocks previously locked variables so that they can be modified again.
+\begin{syntax}
+\command{unlock} \$name1 \$name2 …
+\end{syntax}
+\begin{args}
+\$name1 \$name2 … & Variables to unlock.
+\end{args}
+
+\begin{example}{Variable locks}
+\begin{lstlisting}
+lock a 5
+set a 7; # throws warning to stderr channel
+puts $a
+unlock a
+set a 7
+puts $a
+\end{lstlisting}
+\tcblower
+\begin{lstlisting}
+failed to modify "a": read-only
+5
+7
+\end{lstlisting}
+\end{example}
+
+Note: You can lock array elements, but not an entire array.
+\clearpage
+\section{Log File}
+The commands \cmdlink{openLogFile} and \cmdlink{closeLogFile} open and close a file that logs Tcl \textit{puts} commands. 
+Only one log file can be opened at a time; opening a new log file will close any log file currently open.
+\begin{syntax}
+\command{openLogFile} \$filename <-append>
+\end{syntax}
+\begin{syntax}
+\command{closeLogFile}
+\end{syntax}
+\begin{args}
+\$filename & File to write to. \\
+-append & Whether to append to log file. Default overwrites the file.
+\end{args}
+
+\begin{example}{Opening and Closing Log File}
+\begin{lstlisting}
+openLogFile logFile.txt
+puts "hello world"
+puts "foo bar"
+closeLogFile
+\end{lstlisting}
+\tcblower\quad
+"logFile.txt"
+\begin{lstlisting}
+hello world
+foo bar
+\end{lstlisting}
+\end{example}
+\clearpage
+
+\printindex
 \end{document}

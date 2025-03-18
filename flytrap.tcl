@@ -24,6 +24,7 @@ namespace eval ::flytrap {
     variable errorStack; # Commands evaluated before error
     variable stepHistory; # History of enter and leave traces in Eval
     variable excludeList {catch try}; # Commands to ignore (for flytrap)
+    variable logFileID; # File ID for log file
        
     # Exported commands
     namespace export pause; # Enter interactive mode in current level.
@@ -31,6 +32,8 @@ namespace eval ::flytrap {
     namespace export printVars; # Print variables to screen.
     namespace export viewVars; # View all variables in current level.
     namespace export varViewer; # Widget class for viewing variables.
+    namespace export openLogFile closeLogFile; # Log file for puts statements
+    namespace export lock unlock; # Set read-only variables    
 }
 
 # pause --
@@ -488,5 +491,173 @@ proc ::flytrap::viewVars {} {
     }
 }
 
+# openLogFile --
+#
+# Creates a log file for echoing puts statements (with one arg) to a file
+#
+# Syntax:
+# openLogFile $filename <-append>
+#
+# Arguments:
+# filename      Log file name
+# -append       Option to append
+
+proc ::flytrap::openLogFile {filename {access w}} {
+    variable logFileID
+    closeLogFile
+    if {$access eq "-append"} {
+        set access a
+    }
+    set logFileID [open $filename $access]
+    trace add execution ::puts leave ::flytrap::logPuts
+    return
+}
+
+# closeLogFile --
+#
+# Closes the current log file (if it exists)
+#
+# Syntax:
+# closeLogFile
+
+proc ::flytrap::closeLogFile {} {
+    variable logFileID
+    if {[info exists logFileID]} {
+        close $logFileID
+        unset logFileID
+        trace remove execution ::puts leave ::flytrap::logPuts
+    }
+    return
+}
+
+# logPuts --
+#
+# Command execution trace on the Tcl puts command.
+
+proc ::flytrap::logPuts {cmdString code result op} {
+    variable logFileID
+    # Interpret how puts was called
+    set args [lrange $cmdString 1 end]
+    set msg [lindex $args end]
+    set nonewline 0
+    set chan stdout; # Default channel
+    switch [llength $args] {
+        1 { # puts $string (normal case)
+        }
+        2 { # puts -nonewline $string || puts $chan $string
+            set arg [lindex $args 0]
+            if {$arg eq "-nonewline"} {
+                set nonewline 1
+            } else {
+                set chan $arg
+            }
+        }
+        3 { # puts -nonewline $chan $string
+            lassign $args option chan
+            if {$option eq "-nonewline"} {
+                set nonewline 1
+            }
+        }
+    }
+    # Log if sending to stdout
+    if {$chan eq "stdout"} {
+        if {$nonewline} {
+            puts -nonewline $logFileID $msg
+        } else {
+            puts $logFileID $msg
+        }
+    }
+    return
+}
+
+# lock --
+#
+# Hard set of a variable. locked variables cannot be modified by set or default.
+# Cannot lock an entire array.
+#
+# Syntax:
+# lock $varName <$value>
+#
+# Arguments:
+# varName       Variable to lock
+# value         Value to set
+
+proc ::flytrap::lock {varName args} {
+    upvar 1 $varName myVar
+    if {[array exists myVar]} {
+        return -code error "cannot lock an array"
+    }
+    # Switch for arity (allow for self-tie)
+    if {[llength $args] == 0} {
+        if {[info exists myVar]} {
+            set value $myVar
+        } else {
+            return -code error "can't read \"$varName\": no such variable"
+        }
+    } elseif {[llength $args] == 1} {
+        set value [lindex $args 0]
+    } else {
+        return -code error "wrong # args: should be \"lock varName ?value?\""
+    }
+    # Remove any existing lock trace
+    if {[info exists myVar]} {
+        unlock myVar
+    }
+    # Set value and define lock trace
+    set myVar $value
+    trace add variable myVar write [list ::flytrap::LockTrace $value]
+    return $value
+}
+
+# unlock --
+#
+# Unlock defined variables
+#
+# Syntax:
+# unlock $varName ...
+#
+# Arguments:
+# varName...    Variables to unlock
+
+proc ::flytrap::unlock {args} {
+    foreach varName $args {
+        upvar 1 $varName myVar
+        if {[array exists myVar]} {
+            return -code error "cannot unlock an array"
+        }
+        if {![info exists myVar]} {
+            return -code error "can't unlock \"$varName\": no such variable"
+        }
+        set value $myVar; # Current value
+        trace remove variable myVar write [list ::flytrap::LockTrace $value]
+    }
+    return
+}
+
+# LockTrace --
+#
+# Private procedure, used for enforcing locked value
+# Prints warning to notify user that variable is locked
+#
+# Syntax:
+# LockTrace $value $varName $index $op
+#
+# Arguments:
+# value         Value to lock
+# varName       Variable (or array) name
+# index         Index of array if variable is array
+# op            Trace operation (unused)
+
+proc ::flytrap::LockTrace {value varName index op} {
+    upvar 1 $varName myVar
+    if {[array exists myVar]} {
+        set myVar($index) $value
+        puts stderr "failed to modify \"${varName}($index)\": read-only"
+    } else {
+        set myVar $value
+        puts stderr "failed to modify \"$varName\": read-only"
+    }
+}
+
 # Finally, provide the package
-package provide flytrap 1.1.1
+package provide flytrap 1.2
